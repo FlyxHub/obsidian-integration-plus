@@ -24,6 +24,7 @@ npm run fmt          # Prettier (tabs, width 100)
 - Node 24.15+. `main.js` is gitignored; ship it only in releases, with `manifest.json` and `styles.css`.
 - `effect` and `@effect/vitest` are pinned to `4.0.0-rc.112` to match the lib, and `overrides` pins `@effect/platform-node-shared` to the same version. A mismatched Effect prerelease fails at runtime with "Cannot find module effect/dist/...". Upgrade all of them together with `@markdown-confluence/*`.
 - `npm version <x>` runs `version-bump.mjs`, which copies the version into `manifest.json` and records it in `versions.json` with the current `minAppVersion`.
+- `tsconfig.json` includes the tests, so `npm run typecheck` and ESLint's type-aware rules cover them.
 - Test files can't import runtime values from `obsidian` (the package ships only types), so keep testable logic in modules that import `obsidian` as `import type` (see `settings.ts`).
 
 ## Git workflow
@@ -44,6 +45,13 @@ Conversion, page-tree planning and Confluence API calls all live in `@markdown-c
 - `src/ObsidianAuthentication.ts` + `src/desktopFetch.ts`: authenticated Confluence client. `desktopFetch` uses Node `https` to avoid CORS, rejects non-HTTPS URLs and refuses redirects so credentials can't be forwarded.
 - `src/BrowserOAuth.ts`, `src/AtlassianOAuth.ts`, `src/OAuthCallback.ts`: OAuth sign-in (authorization code with PKCE, or device code) and token refresh, with tokens in SecretStorage. `OAuthCallback` runs a short-lived, hardened HTTP listener on 127.0.0.1. Treat changes here as security-sensitive and keep the tests passing.
 - `src/KrokiFetch.ts`, `src/DataviewTransformer.ts`: optional Kroki transport, and publishing Dataview query results through Dataview's public API.
+- `src/sync/`: pull (Confluence → Obsidian) and the pre-publish check, modeled on git pull/push.
+  - `syncState.ts` stores a **base snapshot** per page (version, title, and the body converted to Markdown) in `<plugin dir>/sync/<pageId>.json`, recorded after every successful publish (`main.ts` `recordPublishedBases`) and pull.
+  - `adfMarkdown.ts` `adfToMergeMarkdown` converts ADF block by block: readable Markdown when it re-parses to the same ADF, ignoring editor-only attributes like `localId`; otherwise an `adf` fence. The lib's own `lossless` mode fences almost everything on pages saved in Confluence's editor, so don't switch to it. Base and remote must always go through this same function, or every pull shows spurious changes. It also neutralizes code blocks that plugins execute (`dataviewjs`, and so on); pulled content is attacker-controllable by anyone who can edit the page.
+  - `merge.ts`: diff3 via `node-diff3` on note bodies with frontmatter split off; conflicts use `<<<<<<< Obsidian` / `>>>>>>> Confluence` markers. With no base, `mergeTwoWay` marks every difference and applies nothing.
+  - `pull.ts` `PullService`: merges linked notes and imports new pages under the parent page, against the `ConfluenceRemote` and `PullVault` interfaces, so it's unit-tested with fakes (`pull.test.ts`). Imported file names come from remote titles and must go through `toNoteName`.
+  - `publishGate.ts`: before publishing, blocks notes with conflict markers or with a remote version newer than their base. Notes whose remote version equals the base are "up to date", and `doPublish` republishes them with `forceOverwrite` if the lib refused because another user edited last. The lib's transformer hook can't be used for this, because one failing note aborts the whole publish.
+  - `confluenceRemote.ts` wraps the lib client; child listing and batch version reads use raw `client.sendRequest` to `/wiki/api/v2/...`, as the lib itself does.
 - `src/ConfluenceSettingTab.ts`, `src/CompletedModal.tsx`, `src/ConfluencePerPageForm.tsx`: UI. The modals mount React 19 with `createRoot` and unmount in `onClose`. The per-page form is generated from the lib's `ConfluencePageConfig.conniePerPageConfig`. Styles live in `styles.css` and use Obsidian CSS variables.
 
 ## Obsidian plugin rules
@@ -107,4 +115,5 @@ These are deliberate; keep them unless the reason no longer applies.
 - `getVaultConfig` uses the undocumented `vault.getConfig` to find the active theme and snippets, behind a typed optional accessor.
 - `ObsidianPlatform.writeFileString` replaces whole files with `vault.process`, because the lib computes the new content. It is not a read-modify-write inside `process`.
 - `eslint.config.mjs` turns off `no-nodejs-modules` (desktop-only), `prefer-setting-definitions` (needs 1.13), and `prefer-window-timers` for the Node-side OAuth modules. It also relaxes the `no-unsafe-*` rules in tests.
+- `sync/syncState.ts` also uses `vault.adapter`, for the same reason: it writes into the plugin folder. Page IDs are validated before they become file names.
 - `ConfluenceSettingTab` renders imperatively with `display()`. When `minAppVersion` reaches 1.13.0, migrate to `getSettingDefinitions()`.

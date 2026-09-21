@@ -423,6 +423,13 @@ export class ConfluenceSettingTab extends PluginSettingTab {
 			() => this.settings.renderDataview,
 			(value) => (this.settings.renderDataview = value),
 		);
+		this.addToggle(
+			containerEl,
+			"Import new pages when pulling",
+			"When you pull all notes, create notes for pages that were added under the parent page in Confluence.",
+			() => this.settings.importNewPages,
+			(value) => (this.settings.importNewPages = value),
+		);
 	}
 
 	private renderMermaid(containerEl: HTMLElement) {

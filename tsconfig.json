@@ -28,5 +28,5 @@
 		"allowUnusedLabels": false
 	},
 	"include": ["src/**/*.ts", "src/**/*.tsx"],
-	"exclude": ["node_modules", "src/**/*.test.ts"]
+	"exclude": ["node_modules"]
 }

@@ -15,7 +15,7 @@ function serverResponse(status = 200) {
 	const outgoing = Object.assign(new EventEmitter(), {
 		end: vi.fn(() => {
 			queueMicrotask(() => {
-				const callback = vi.mocked(request).mock.calls[0][2] as (response: unknown) => void;
+				const callback = vi.mocked(request).mock.calls[0]?.[2] as (response: unknown) => void;
 				callback(incoming);
 				incoming.emit("data", Buffer.from('{"id":"page"}'));
 				incoming.emit("end");
@@ -36,7 +36,7 @@ test("uses HTTPS with the abort signal and preserves token bodies and response s
 		signal,
 		redirect: "error",
 	});
-	expect(vi.mocked(request).mock.calls[0][1]).toMatchObject({ signal, method: "POST" });
+	expect(vi.mocked(request).mock.calls[0]?.[1]).toMatchObject({ signal, method: "POST" });
 	expect(fixture.outgoing.end).toHaveBeenCalledWith(Buffer.from("client_secret=a%2Bb"));
 	expect(response.ok).toBe(true);
 	expect(await response.json()).toEqual({ id: "page" });
@@ -62,15 +62,15 @@ test("preserves binary attachment bytes and the matching multipart boundary", as
 		headers: { Authorization: "Bearer test-token" },
 		body: form,
 	});
-	const sent = fixture.outgoing.end.mock.calls[0][0] as Buffer;
-	const options = vi.mocked(request).mock.calls[0][1] as { headers: Record<string, string> };
-	const boundary = options.headers["content-type"].split("boundary=")[1];
+	const sent = (fixture.outgoing.end.mock.calls[0] as unknown[] | undefined)?.[0] as Buffer;
+	const options = vi.mocked(request).mock.calls[0]?.[1] as { headers: Record<string, string> };
+	const boundary = options.headers["content-type"]?.split("boundary=")[1];
 	expect(boundary).toBeTruthy();
 	expect(sent.includes(Buffer.from(bytes))).toBe(true);
 	expect(sent.toString("latin1")).toContain(`--${boundary}`);
 	expect(sent.toString("latin1")).toContain('filename="binary.bin"');
 	expect(sent.toString("latin1")).toContain("file checksum");
-	expect(options.headers.authorization).toBe("Bearer test-token");
+	expect(options.headers["authorization"]).toBe("Bearer test-token");
 });
 
 test("rejects insecure transport before making a request", async () => {

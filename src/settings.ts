@@ -22,6 +22,8 @@ export interface ObsidianPluginSettings
 	extends ConfluenceUploadSettings.ConfluenceSettings, BrowserOAuthSettings {
 	showPublishResultsModal: boolean;
 	renderDataview: boolean;
+	/** When pulling all notes, create notes for new pages under the parent page. */
+	importNewPages: boolean;
 	mermaidTheme: MermaidTheme;
 	/** Name of the SecretStorage entry that holds the API token or PAT. */
 	apiTokenSecretName: string;
@@ -33,6 +35,7 @@ const PLUGIN_DEFAULTS = {
 	mermaidTheme: "match-obsidian",
 	showPublishResultsModal: true,
 	renderDataview: false,
+	importNewPages: true,
 	apiTokenSecretName: "",
 	clientSecretSecretName: "",
 	oauthMode: "service-account",

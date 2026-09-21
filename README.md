@@ -1,6 +1,6 @@
 # Confluence Integration for Obsidian
 
-Confluence Integration publishes notes from your Obsidian vault to [Atlassian Confluence](https://www.atlassian.com/software/confluence) Cloud. The plugin converts each note to [Atlassian Document Format (ADF)](https://developer.atlassian.com/cloud/jira/platform/apis/document/structure/) with the [`@markdown-confluence/lib`](https://www.npmjs.com/package/@markdown-confluence/lib) library, which the [markdown-confluence](https://github.com/markdown-confluence/markdown-confluence) project maintains. This repository contains only the Obsidian plugin.
+Confluence Integration publishes notes from your Obsidian vault to [Atlassian Confluence](https://www.atlassian.com/software/confluence) Cloud, and pulls changes that people make in Confluence back into your notes. The plugin converts each note to [Atlassian Document Format (ADF)](https://developer.atlassian.com/cloud/jira/platform/apis/document/structure/) with the [`@markdown-confluence/lib`](https://www.npmjs.com/package/@markdown-confluence/lib) library, which the [markdown-confluence](https://github.com/markdown-confluence/markdown-confluence) project maintains. This repository contains only the Obsidian plugin.
 
 The plugin runs on desktop only and requires Obsidian 1.11.4 or later.
 
@@ -15,6 +15,7 @@ Copyright © 2022 Atlassian US, Inc.
 - [Connect to Confluence](#connect-to-confluence)
 - [Publish notes](#publish-notes)
 - [Choose which notes are published](#choose-which-notes-are-published)
+- [Pull changes from Confluence](#pull-changes-from-confluence)
 - [Diagrams, equations, and embeds](#diagrams-equations-and-embeds)
 - [Set up a development environment](#set-up-a-development-environment)
 - [Test the plugin](#test-the-plugin)
@@ -27,9 +28,9 @@ Copyright © 2022 Atlassian US, Inc.
 Obsidian's developer policies require plugins to disclose the following behavior:
 
 - **Account:** You need an Atlassian Cloud account with access to a Confluence site.
-- **Network use:** The plugin sends note content, attachments, labels, and page metadata over HTTPS to the Confluence site that you configure. It contacts `auth.atlassian.com` and `api.atlassian.com` only to sign in with OAuth and to refresh tokens. If you turn on Kroki or PlantUML rendering, the plugin sends diagram source to the server that you configure. The plugin doesn't collect telemetry.
+- **Network use:** The plugin sends note content, attachments, labels, and page metadata over HTTPS to the Confluence site that you configure. When you pull, it reads pages from that site and writes their content into your notes. It contacts `auth.atlassian.com` and `api.atlassian.com` only to sign in with OAuth and to refresh tokens. If you turn on Kroki or PlantUML rendering, the plugin sends diagram source to the server that you configure. The plugin doesn't collect telemetry.
 - **Local network listener:** Browser OAuth sign-in starts a temporary HTTP listener on `127.0.0.1` at the callback port that you configure. The listener accepts one matching sign-in response, and then stops. It also stops when you cancel sign-in or after five minutes.
-- **Files other than notes:** To match your Obsidian theme in Mermaid diagrams, the plugin reads the active theme and enabled CSS snippets from the vault's configuration folder. The plugin doesn't read files outside the vault.
+- **Files other than notes:** To match your Obsidian theme in Mermaid diagrams, the plugin reads the active theme and enabled CSS snippets from the vault's configuration folder. To support pulling, it saves a snapshot of each published page in a `sync` folder inside the plugin's folder. The plugin doesn't read or write files outside the vault.
 - **Credentials:** The plugin keeps API tokens, client secrets, and OAuth tokens in Obsidian secret storage, not in the plugin's `data.json` file. Earlier versions stored the API token and the service-account client secret in `data.json`. The first time that this version loads, it moves those values into secret storage and removes them from `data.json`.
 
 ## Install the plugin
@@ -67,15 +68,15 @@ If a setting needs attention, the plugin lists it at the top of the settings tab
 
 To publish notes, do any of the following:
 
-- To publish every selected note, click **Publish to Confluence** (the cloud icon) in the ribbon, or run **Publish all notes** from the command palette.
+- To publish every selected note, click **Publish to Confluence** (the cloud upload icon) in the ribbon, or run **Publish all notes** from the command palette.
 - To publish only the active note, run **Publish current note**.
-- To stop a publish, click the status bar item or run **Cancel publishing after the current request**. The plugin keeps pages that it already wrote.
+- To stop a publish or pull, click the status bar item or run **Cancel publish or pull after the current request**. The plugin keeps pages that it already wrote.
 
 After a note is published, the plugin adds `connie-page-id` and `connie-page-url` to its frontmatter.
 
 To manage an existing Confluence page from Obsidian, create a note and set its `connie-page-id` property to the page ID.
 
-**Note:** By default, the plugin doesn't overwrite a page that another user edited last. To overwrite those edits, turn on **Overwrite other users' edits**. Check the conflict first, because the other user's changes are lost.
+**Note:** The plugin doesn't publish over changes in Confluence that you haven't pulled. To bring those changes into your notes, see [Pull changes from Confluence](#pull-changes-from-confluence). To overwrite them instead, turn on **Overwrite other users' edits**; the other user's changes are lost.
 
 ## Choose which notes are published
 
@@ -95,6 +96,78 @@ To include or exclude the active note, run **Enable publishing for current note*
 ### Page hierarchy
 
 The parent page is the root of the published tree, and each folder becomes a page. To give a folder page its own content, add a folder note named after the folder, or named `index.md`, `README.md`, or `readme.md`.
+
+## Pull changes from Confluence
+
+Pull brings edits that people make in Confluence into your notes, so you can work like you do with Git: pull, edit, and then publish.
+
+Each time you publish or pull a page, the plugin saves a snapshot of the page as it is in Confluence. When you pull, the plugin compares the page with that snapshot to find what changed in Confluence, and then applies only those changes to your note. Changes that you made in Obsidian are kept, including Mermaid source, embeds, and links that look different in Confluence.
+
+### Pull notes
+
+To pull, do one of the following:
+
+- To pull every note that's linked to a page, click **Pull from Confluence** (the cloud download icon) in the ribbon, or run **Pull all notes**.
+- To pull only the active note, run **Pull current note**.
+
+When the pull finishes, a dialog lists the notes that were updated, imported, or have conflicts. If a note has conflicts, the dialog opens even when **Show results after publishing** is off.
+
+If a page's title changed in Confluence, the plugin sets the note's `connie-title` property to the new title. It doesn't rename the note file.
+
+If a page was deleted in Confluence, the plugin reports it and keeps your note.
+
+### Resolve conflicts
+
+A conflict happens when a block changed both in Obsidian and in Confluence. The plugin keeps both versions in the note, between Git-style markers:
+
+```text
+<<<<<<< Obsidian
+The text in your note.
+=======
+The text in Confluence.
+>>>>>>> Confluence
+```
+
+To resolve a conflict:
+
+1. Open the note, and find each block that starts with `<<<<<<< Obsidian`.
+1. Edit the block so that it contains the text that you want to keep.
+1. Delete the three marker lines.
+1. Publish the note.
+
+The plugin doesn't publish or pull a note that still contains conflict markers.
+
+### How publishing uses pulled changes
+
+Like `git push`, publishing stops if Confluence has changes that you haven't pulled:
+
+- If a page changed in Confluence since your last publish or pull, nothing is published, and the results dialog lists the notes to pull first.
+- After you pull a page that another user edited, you can publish over their edit, because it's already merged into your note.
+- For a page that you haven't published or pulled since you installed this version, the plugin keeps the earlier rule: it doesn't overwrite a page that another user edited last, unless **Overwrite other users' edits** is on.
+
+**Note:** Pages that you published before you installed this version have no snapshot yet. If you're the last person who edited the page, the first pull records a snapshot and doesn't change the note. If someone else edited it, the first pull can't tell which changes are whose, so it marks every difference as a conflict.
+
+### Import new pages
+
+When **Import new pages when pulling** is on, **Pull all notes** also creates notes for pages that were added under the parent page in Confluence:
+
+- A page without child pages becomes a note in the folder that matches its parent page.
+- A page with child pages becomes a folder with a folder note of the same name.
+- A folder page that the plugin generated becomes a folder without a note.
+
+The plugin adds `connie-page-id` to each imported note. If the page title contains characters that aren't allowed in file names, the plugin replaces them in the file name, and keeps the original title in `connie-title`.
+
+The plugin skips a page, and says why in the results dialog, in these cases:
+
+- A note already exists at the path where the page would be imported. The plugin doesn't overwrite it. To link that note to the page, add the page's `connie-page-id` to the note.
+- The page's parent is a regular note, not a folder note. To import its child pages, move the parent note into a folder of the same name.
+
+### Limitations
+
+- Pull doesn't download attachments. Images and other attachments stay in Confluence, and the note refers to them in an `adf` code block, which is restored exactly when you publish.
+- Content that Markdown can't represent, such as status lozenges and page layouts, appears as an `adf` code block. Edit these blocks in Confluence.
+- For security, pulled code blocks that plugins run as JavaScript, such as `dataviewjs` and `js-engine`, become plain `text` code blocks, and Dataview inline JavaScript (`` `$= ...` ``) is disabled. This prevents anyone who can edit a Confluence page from running code in your vault. Code blocks that you wrote in Obsidian aren't changed.
+- Pull applies changes line by line. If you and someone in Confluence edit the same paragraph, the whole paragraph is a conflict.
 
 ## Diagrams, equations, and embeds
 
@@ -207,7 +280,23 @@ Unit tests run in Node.js, where the `obsidian` package provides only types. Cod
    - The note's frontmatter contains `connie-page-id` and `connie-page-url`.
    - The developer console shows no errors.
 1. Edit the note, publish it again, and verify that the plugin updates the same Confluence page.
-1. Start a publish of several notes, and then run **Cancel publishing after the current request**. Verify that the publish stops.
+1. Start a publish of several notes, and then run **Cancel publish or pull after the current request**. Verify that the publish stops.
+
+#### Test pulling
+
+These steps need a second Confluence account, or a colleague, to act as the other editor.
+
+1. Publish a note that contains a Mermaid diagram and at least three paragraphs.
+1. Run **Pull all notes**. Verify that the dialog reports the note as unchanged.
+1. As the other user, edit the last paragraph in Confluence.
+1. In Obsidian, edit the first paragraph, and then run **Publish all notes**. Verify that nothing is published and the dialog says to pull the note first.
+1. Run **Pull all notes**. Verify the following:
+   - The dialog lists the note as updated.
+   - The note contains your edit, the Confluence edit, and the Mermaid source.
+1. Run **Publish all notes**, and verify that the page in Confluence shows both edits.
+1. As the other user, edit the first paragraph in Confluence. In Obsidian, edit the same paragraph differently, and then pull. Verify that the note contains conflict markers, and that publishing is refused until you remove them.
+1. As the other user, create a page under the parent page. Pull, and verify that a new note with its `connie-page-id` appears in the folder to publish.
+1. As the other user, add a `dataviewjs` code block to a page. Pull, and verify that the block arrives as a `text` code block.
 
 #### Test the credential migration
 

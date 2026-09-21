@@ -50,6 +50,15 @@ const CompletedView = ({ uploadResults }: UploadResultsProps) => {
 		return (
 			<div className="confluence-results">
 				<p className="confluence-error">{errorMessage}</p>
+				{failedFiles.length > 0 && (
+					<ul>
+						{failedFiles.map((file) => (
+							<li key={file.fileName}>
+								<strong>{file.fileName}</strong>: {file.reason}
+							</li>
+						))}
+					</ul>
+				)}
 			</div>
 		);
 	}

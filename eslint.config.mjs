@@ -10,7 +10,7 @@ export default defineConfig([
 		languageOptions: {
 			parserOptions: {
 				projectService: {
-					allowDefaultProject: ["src/*.test.ts"],
+					allowDefaultProject: [],
 				},
 			},
 		},

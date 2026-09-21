@@ -42,6 +42,13 @@ import { createDataviewTransformer } from "./DataviewTransformer";
 import { krokiFetch } from "./KrokiFetch";
 import { createObsidianConfluenceClient } from "./ObsidianAuthentication";
 import { ObsidianPlatformLive } from "./effects/ObsidianPlatform";
+import { adfToMergeMarkdown } from "./sync/adfMarkdown";
+import { createConfluenceRemote, type ConfluenceRemote } from "./sync/confluenceRemote";
+import { createObsidianPullVault, linkedPageId } from "./sync/obsidianVault";
+import { PullService } from "./sync/pull";
+import { PullResultsModal, summarizePull } from "./sync/PullResultsModal";
+import { checkBeforePublish, type NoteToPublish } from "./sync/publishGate";
+import { createSyncStateStore, type SyncStateStore } from "./sync/syncState";
 import {
 	ObsidianPluginSettings,
 	mergeSettings,
@@ -51,6 +58,10 @@ import {
 } from "./settings";
 
 const PUBLISH_FLAG = "connie-publish";
+/** The publisher's error when a page was last edited by someone else. */
+const EDITED_BY_OTHER_USER = "Page last updated by another user";
+
+type ConfluenceClient = Awaited<ReturnType<typeof createObsidianConfluenceClient>>;
 
 /** Obsidian's bundled Mermaid; only the part used to copy the user's diagram config. */
 interface ObsidianMermaid {
@@ -65,6 +76,7 @@ export default class ConfluencePlugin extends Plugin {
 	private isSyncing = false;
 	private publishAbort: AbortController | undefined;
 	private publishStatus: HTMLElement | undefined;
+	private syncState!: SyncStateStore;
 	private platform!: Layer.Layer<MarkdownConfluencePlatform>;
 	private settingsLayer!: Layer.Layer<ConfluenceUploadSettings.ConfluenceSettingsService>;
 
@@ -79,13 +91,42 @@ export default class ConfluencePlugin extends Plugin {
 
 	override async onload() {
 		await this.loadSettings();
+		const pluginDir =
+			this.manifest.dir ?? `${this.app.vault.configDir}/plugins/${this.manifest.id}`;
+		this.syncState = createSyncStateStore(
+			this.app.vault.adapter,
+			normalizePath(`${pluginDir}/sync`),
+		);
 
 		this.publishStatus = this.addStatusBarItem();
 		this.publishStatus.addClass("confluence-publish-status");
-		this.registerDomEvent(this.publishStatus, "click", () => this.cancelPublish());
+		this.registerDomEvent(this.publishStatus, "click", () => this.cancelSync());
 
-		this.addRibbonIcon("cloud", "Publish to Confluence", () => {
+		this.addRibbonIcon("cloud-upload", "Publish to Confluence", () => {
 			void this.runPublish();
+		});
+		this.addRibbonIcon("cloud-download", "Pull from Confluence", () => {
+			void this.runPull();
+		});
+
+		this.addCommand({
+			id: "pull-current",
+			name: "Pull current note",
+			checkCallback: (checking) => {
+				const file = this.app.workspace.getActiveViewOfType(MarkdownView)?.file;
+				const pageId = file ? linkedPageId(this.app, file) : undefined;
+				if (!pageId) return false;
+				if (!checking) void this.runPull([pageId]);
+				return true;
+			},
+		});
+
+		this.addCommand({
+			id: "pull-all",
+			name: "Pull all notes",
+			callback: () => {
+				void this.runPull();
+			},
 		});
 
 		this.addCommand({
@@ -109,10 +150,10 @@ export default class ConfluencePlugin extends Plugin {
 
 		this.addCommand({
 			id: "cancel-publish",
-			name: "Cancel publishing after the current request",
+			name: "Cancel publish or pull after the current request",
 			checkCallback: (checking) => {
 				if (!this.isSyncing) return false;
-				if (!checking) this.cancelPublish();
+				if (!checking) this.cancelSync();
 				return true;
 			},
 		});
@@ -274,28 +315,22 @@ export default class ConfluencePlugin extends Plugin {
 		}).open();
 	}
 
-	private cancelPublish() {
+	private cancelSync() {
 		if (!this.publishAbort) return;
 		this.publishAbort.abort();
 		new Notice("Cancellation requested. Completed writes will be kept.");
 	}
 
-	private async runPublish(publishFilter?: string): Promise<void> {
+	/** Run one publish or pull at a time, with cancellation and status bar progress. */
+	private async runExclusive(task: (signal: AbortSignal) => Promise<void>): Promise<void> {
 		if (this.isSyncing) {
-			new Notice("A Confluence publish is already in progress.");
+			new Notice("A Confluence publish or pull is already in progress.");
 			return;
 		}
-
 		this.isSyncing = true;
 		this.publishAbort = new AbortController();
 		try {
-			this.showPublishResults(await this.doPublish(this.publishAbort.signal, publishFilter));
-		} catch (error) {
-			this.showPublishResults({
-				errorMessage: toError(error).message,
-				failedFiles: [],
-				filesUploadResult: [],
-			});
+			await task(this.publishAbort.signal);
 		} finally {
 			this.isSyncing = false;
 			this.publishAbort = undefined;
@@ -303,8 +338,76 @@ export default class ConfluencePlugin extends Plugin {
 		}
 	}
 
+	private setStatus(message: string) {
+		this.publishStatus?.setText(`${message} · click to cancel`);
+	}
+
+	private async runPull(pageIds?: string[]): Promise<void> {
+		await this.runExclusive(async (signal) => {
+			try {
+				const settings = this.resolvedSettings();
+				const client = await this.authenticationClient();
+				const service = new PullService(
+					createConfluenceRemote(client),
+					createObsidianPullVault(this.app),
+					this.syncState,
+				);
+				const importNew = settings.importNewPages && !pageIds && settings.confluenceParentId;
+				const report = await service.pull({
+					confluenceBaseUrl: settings.confluenceBaseUrl,
+					...(pageIds ? { pageIds } : {}),
+					...(importNew
+						? {
+								importUnder: {
+									rootPageId: settings.confluenceParentId,
+									rootFolder: settings.folderToPublish,
+								},
+							}
+						: {}),
+					signal,
+					onProgress: (message) => this.setStatus(message),
+				});
+				if (this.settings.showPublishResultsModal || report.conflicted.length > 0)
+					new PullResultsModal(this.app, report).open();
+				else new Notice(summarizePull(report), 10000);
+			} catch (error) {
+				new PullResultsModal(this.app, { errorMessage: toError(error).message }).open();
+			}
+		});
+	}
+
+	private async runPublish(publishFilter?: string): Promise<void> {
+		await this.runExclusive(async (signal) => {
+			try {
+				this.showPublishResults(await this.doPublish(signal, publishFilter));
+			} catch (error) {
+				this.showPublishResults({
+					errorMessage: toError(error).message,
+					failedFiles: [],
+					filesUploadResult: [],
+				});
+			}
+		});
+	}
+
 	private async doPublish(signal: AbortSignal, publishFilter?: string): Promise<UploadResults> {
-		const publisher = await this.createPublisher();
+		const client = await this.authenticationClient();
+		const remote = createConfluenceRemote(client);
+		const check = await checkBeforePublish(
+			await this.notesToPublish(publishFilter),
+			remote,
+			this.syncState,
+		);
+		if (check.blocked.length > 0) {
+			return {
+				errorMessage:
+					"Nothing was published. Like a rejected git push, these notes need attention first:",
+				failedFiles: check.blocked,
+				filesUploadResult: [],
+			};
+		}
+
+		const publisher = await this.createPublisher(client);
 		const results = await this.runObsidianEffect(
 			publisher.publishEffect(publishFilter, { signal }),
 		);
@@ -315,21 +418,89 @@ export default class ConfluencePlugin extends Plugin {
 			filesUploadResult: [],
 		};
 		for (const result of results) {
-			if (result.successfulUploadResult) {
-				uploadResults.filesUploadResult.push(result.successfulUploadResult);
-			} else {
-				uploadResults.failedFiles.push({
-					fileName: result.node.file.absoluteFilePath,
-					reason: result.reason ?? "No reason provided",
-				});
+			const path = toVaultPath(result.node.file.absoluteFilePath);
+			let uploaded = result.successfulUploadResult;
+			let reason = result.reason;
+			// The page was last edited by someone else, but that edit is exactly the version
+			// that was pulled and merged into this note, so it's safe to publish over it.
+			if (!uploaded && reason?.includes(EDITED_BY_OTHER_USER) && check.upToDate.has(path)) {
+				signal.throwIfAborted();
+				const retry = await this.publishOverMergedEdit(client, path, signal);
+				uploaded = retry.uploaded;
+				reason = retry.reason;
 			}
+			if (uploaded) uploadResults.filesUploadResult.push(uploaded);
+			else
+				uploadResults.failedFiles.push({
+					fileName: path,
+					reason: reason ?? "No reason provided",
+				});
 		}
+
+		const baseErrors = await this.recordPublishedBases(remote, uploadResults.filesUploadResult);
+		uploadResults.failedFiles.push(...baseErrors);
 		return uploadResults;
 	}
 
-	private async createPublisher() {
-		const settings = this.resolvedSettings();
-		const confluenceClient = await this.authenticationClient();
+	private async publishOverMergedEdit(client: ConfluenceClient, path: string, signal: AbortSignal) {
+		const publisher = await this.createPublisher(client, { forceOverwrite: true });
+		const results = await this.runObsidianEffect(publisher.publishEffect(path, { signal }));
+		const result = results.find((entry) => toVaultPath(entry.node.file.absoluteFilePath) === path);
+		return { uploaded: result?.successfulUploadResult, reason: result?.reason };
+	}
+
+	/** After publishing, remember what Confluence now holds as the base for the next pull. */
+	private async recordPublishedBases(
+		remote: ConfluenceRemote,
+		uploads: UploadResults["filesUploadResult"],
+	): Promise<UploadResults["failedFiles"]> {
+		const errors: UploadResults["failedFiles"] = [];
+		for (const upload of uploads) {
+			const { pageId, absoluteFilePath } = upload.adfFile;
+			if (!pageId) continue;
+			try {
+				if (upload.contentResult === "same" && (await this.syncState.get(pageId))) continue;
+				const page = await remote.getPage(pageId);
+				if (!page) continue;
+				await this.syncState.set({
+					pageId,
+					version: page.version,
+					title: page.title,
+					markdown: adfToMergeMarkdown(page.adf, this.settings.confluenceBaseUrl),
+				});
+			} catch (error) {
+				errors.push({
+					fileName: toVaultPath(absoluteFilePath),
+					reason: `Published, but the pull base could not be saved: ${toError(error).message}`,
+				});
+			}
+		}
+		return errors;
+	}
+
+	/** The notes a publish will send, so they can be checked against Confluence first. */
+	private async notesToPublish(publishFilter?: string): Promise<NoteToPublish[]> {
+		const files = publishFilter
+			? [this.app.vault.getFileByPath(publishFilter)].filter((file) => file !== null)
+			: this.app.vault
+					.getMarkdownFiles()
+					.filter((file) =>
+						shouldPublishMarkdownFile(file.path, this.frontmatter(file), this.settings),
+					);
+		return Promise.all(
+			files.map(async (file) => ({
+				path: file.path,
+				pageId: linkedPageId(this.app, file),
+				text: await this.app.vault.cachedRead(file),
+			})),
+		);
+	}
+
+	private async createPublisher(
+		confluenceClient: ConfluenceClient,
+		overrides: Partial<ObsidianPluginSettings> = {},
+	) {
+		const settings = { ...this.resolvedSettings(), ...overrides };
 		const mermaidItems = await this.getMermaidItems();
 		const mermaidRenderer = new ElectronMermaidRenderer(
 			mermaidItems.extraStyleSheets,
@@ -364,9 +535,7 @@ export default class ConfluencePlugin extends Plugin {
 			}
 		}
 
-		return new Publisher(settings, confluenceClient, plugins, (message) => {
-			this.publishStatus?.setText(`${message} · click to cancel`);
-		});
+		return new Publisher(settings, confluenceClient, plugins, (message) => this.setStatus(message));
 	}
 
 	private async getMermaidItems() {
@@ -465,6 +634,11 @@ export default class ConfluencePlugin extends Plugin {
 		}
 		new Notice(getPublishResultsMessage(uploadResults), 10000);
 	}
+}
+
+/** The publisher reports paths relative to the vault, sometimes with a leading slash. */
+function toVaultPath(path: string): string {
+	return path.replaceAll("\\", "/").replace(/^\/+/, "");
 }
 
 function toError(error: unknown): Error {
