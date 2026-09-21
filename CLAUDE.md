@@ -30,6 +30,10 @@ npm run fmt          # Prettier (tabs, width 100)
 
 After making changes, commit them and push to `origin` without waiting to be asked. Run `npm run typecheck`, `npm run lint` and `npm test` first, and say so if any fail. Work on a feature branch rather than `main`; push new branches with `git push -u origin <branch>`.
 
+## Documentation
+
+Write user-facing docs, such as `README.md`, in the style of the [Google developer documentation style guide](https://developers.google.com/style): second person, present tense, active voice, sentence-case headings, serial commas, numbered steps for procedures, and `PLACEHOLDER` names that the text explains. The README includes the testing and release guides; update them when scripts, the release process, or anything in the Disclosures section changes.
+
 ## Architecture
 
 Conversion, page-tree planning and Confluence API calls all live in `@markdown-confluence/lib`, which is built on Effect. The plugin supplies Obsidian implementations of the lib's services and the UI:

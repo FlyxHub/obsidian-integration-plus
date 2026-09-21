@@ -1,93 +1,301 @@
 # Confluence Integration for Obsidian
 
-Copyright © 2022 Atlassian Pty Ltd
-Copyright © 2022 Atlassian US, Inc
+Confluence Integration publishes notes from your Obsidian vault to [Atlassian Confluence](https://www.atlassian.com/software/confluence) Cloud. The plugin converts each note to [Atlassian Document Format (ADF)](https://developer.atlassian.com/cloud/jira/platform/apis/document/structure/) with the [`@markdown-confluence/lib`](https://www.npmjs.com/package/@markdown-confluence/lib) library, which the [markdown-confluence](https://github.com/markdown-confluence/markdown-confluence) project maintains. This repository contains only the Obsidian plugin.
 
-Publish notes from your Obsidian vault to [Atlassian Confluence](https://www.atlassian.com/software/confluence) Cloud. Notes are converted to the [Atlassian Document Format (ADF)](https://developer.atlassian.com/cloud/jira/platform/apis/document/structure/) by the [`@markdown-confluence/lib`](https://www.npmjs.com/package/@markdown-confluence/lib) library from the [markdown-confluence](https://github.com/markdown-confluence/markdown-confluence) project. This repository contains the Obsidian plugin only.
+The plugin runs on desktop only and requires Obsidian 1.11.4 or later.
 
-The plugin is desktop only and requires Obsidian 1.11.4 or later.
+Copyright © 2022 Atlassian Pty Ltd.
+
+Copyright © 2022 Atlassian US, Inc.
+
+## Contents
+
+- [Disclosures](#disclosures)
+- [Install the plugin](#install-the-plugin)
+- [Connect to Confluence](#connect-to-confluence)
+- [Publish notes](#publish-notes)
+- [Choose which notes are published](#choose-which-notes-are-published)
+- [Diagrams, equations, and embeds](#diagrams-equations-and-embeds)
+- [Set up a development environment](#set-up-a-development-environment)
+- [Test the plugin](#test-the-plugin)
+- [Release the plugin](#release-the-plugin)
+- [Report issues](#report-issues)
+- [License](#license)
 
 ## Disclosures
 
-- **Account required.** Publishing requires an Atlassian Cloud account with access to a Confluence site.
-- **Network use.** The plugin sends note content, attachments, labels and page metadata to the Confluence site you configure, over HTTPS. It contacts Atlassian (`auth.atlassian.com`, `api.atlassian.com`) only for OAuth sign-in and token refresh. If you turn on Kroki or PlantUML rendering, diagram source is sent to the server you configure. The plugin has no telemetry.
-- **Local network listener.** Browser OAuth sign-in starts a temporary HTTP listener on `127.0.0.1` at the callback port you configure. It accepts one matching login response and stops after sign-in, cancellation or five minutes.
-- **Files outside your notes.** To match your Obsidian theme, Mermaid rendering reads the active theme and enabled CSS snippets from the vault's config folder. No files outside the vault are read.
-- **Credentials.** API tokens, client secrets and OAuth tokens are kept in Obsidian's secret storage, not in the plugin's `data.json`. Earlier versions stored the API token and service-account client secret in `data.json`; they are moved into secret storage the first time this version loads.
+Obsidian's developer policies require plugins to disclose the following behavior:
 
-## Installation
+- **Account:** You need an Atlassian Cloud account with access to a Confluence site.
+- **Network use:** The plugin sends note content, attachments, labels, and page metadata over HTTPS to the Confluence site that you configure. It contacts `auth.atlassian.com` and `api.atlassian.com` only to sign in with OAuth and to refresh tokens. If you turn on Kroki or PlantUML rendering, the plugin sends diagram source to the server that you configure. The plugin doesn't collect telemetry.
+- **Local network listener:** Browser OAuth sign-in starts a temporary HTTP listener on `127.0.0.1` at the callback port that you configure. The listener accepts one matching sign-in response, and then stops. It also stops when you cancel sign-in or after five minutes.
+- **Files other than notes:** To match your Obsidian theme in Mermaid diagrams, the plugin reads the active theme and enabled CSS snippets from the vault's configuration folder. The plugin doesn't read files outside the vault.
+- **Credentials:** The plugin keeps API tokens, client secrets, and OAuth tokens in Obsidian secret storage, not in the plugin's `data.json` file. Earlier versions stored the API token and the service-account client secret in `data.json`. The first time that this version loads, it moves those values into secret storage and removes them from `data.json`.
 
-Download `main.js`, `manifest.json` and `styles.css` from the releases page. Create `.obsidian/plugins/confluence-integration` inside your vault, put the three files there, restart Obsidian, and turn on **Confluence Integration** under **Settings → Community plugins**.
+## Install the plugin
 
-## Setup
+1. From the [releases page](https://github.com/FlyxHub/obsidian-integration-plus/releases), download `main.js`, `manifest.json`, and `styles.css`.
+1. In your vault, create the folder `.obsidian/plugins/confluence-integration`.
+1. Copy the three files into that folder.
+1. Restart Obsidian.
+1. In Obsidian, go to **Settings** > **Community plugins**, and then turn on **Confluence Integration**.
 
-In the plugin settings:
+## Connect to Confluence
 
-1. Choose an **Authentication type**:
-   - **API token (basic)**: your Atlassian email and an [API token](https://id.atlassian.com/manage-profile/security/api-tokens).
-   - **Bearer token or PAT**: a bearer token.
-   - **OAuth service account**: a client ID and secret from Atlassian Administration.
-   - **OAuth browser sign-in**: sign in through your browser with an OAuth app you registered with Atlassian.
-2. Enter the **Confluence API URL** (for example `https://example.atlassian.net`, or `https://api.atlassian.com/ex/confluence/{cloudId}` for scoped API tokens) and the **Confluence site URL**.
-3. For the API token or client secret, choose or create a secret in Obsidian's secret storage.
-4. Enter the **Parent page ID**: the Confluence page that published notes are created under.
-5. Set the **Folder to publish**, and optionally **Tags to publish** and **Excluded folders**.
+### Before you begin
 
-Settings that need attention are listed at the top of the settings tab.
+- Find the ID of the Confluence page that you want to publish notes under. The ID is the number after `/pages/` in the page URL. For example, the ID in `https://example.atlassian.net/wiki/spaces/DOCS/pages/123456/Home` is `123456`.
+- Get credentials for one of the supported authentication types:
+  - **API token (basic):** your Atlassian email address and an [Atlassian API token](https://id.atlassian.com/manage-profile/security/api-tokens).
+  - **Bearer token or PAT:** a bearer token.
+  - **OAuth service account:** a client ID and client secret from Atlassian Administration.
+  - **OAuth browser sign-in:** the client ID of an OAuth app that you registered with Atlassian.
 
-## Usage
+### Configure the plugin
 
-- Click the cloud icon in the ribbon, or run **Publish all notes**, to publish every selected note.
-- Run **Publish current note** to publish only the active note.
-- Click the status bar item, or run **Cancel publishing after the current request**, to stop a publish. Completed writes are kept.
-- Run **Enable publishing for current note** or **Disable publishing for current note** to include or exclude a note outside the usual folder and tag rules.
-- Run **Edit page settings for current note** to edit the note's Confluence frontmatter, such as its title, labels and content type.
+1. Go to **Settings** > **Confluence Integration**.
+1. In the **Authentication type** list, select your authentication type.
+1. In **Confluence API URL**, enter your site URL, such as `https://example.atlassian.net`. If you use a scoped API token, enter `https://api.atlassian.com/ex/confluence/CLOUD_ID` instead. Replace `CLOUD_ID` with your site's cloud ID.
+1. In **Confluence site URL**, enter the address that you open in a browser, such as `https://example.atlassian.net`.
+1. Enter your credentials. For the API token or client secret, select an existing secret or create one in Obsidian secret storage.
+1. In **Parent page ID**, enter the page ID that you found earlier.
+1. In **Folder to publish**, enter the vault folder that contains the notes to publish.
 
-### Choosing which notes are published
+If a setting needs attention, the plugin lists it at the top of the settings tab.
 
-A note is published when it is inside **Folder to publish**, has one of the **Tags to publish**, or has `connie-publish: true` in its frontmatter. `connie-publish: false` always excludes a note, and **Excluded folders** override everything else.
+## Publish notes
 
-```yaml
----
-connie-publish: true
----
-```
+To publish notes, do any of the following:
 
-After publishing, the plugin writes `connie-page-id` and `connie-page-url` to the note's frontmatter. To manage an existing Confluence page from Obsidian, create a note and set its `connie-page-id`.
+- To publish every selected note, click **Publish to Confluence** (the cloud icon) in the ribbon, or run **Publish all notes** from the command palette.
+- To publish only the active note, run **Publish current note**.
+- To stop a publish, click the status bar item or run **Cancel publishing after the current request**. The plugin keeps pages that it already wrote.
 
-By default, publishing does not overwrite a page that another user edited last. Turn on **Overwrite other users' edits** only after checking the conflict.
+After a note is published, the plugin adds `connie-page-id` and `connie-page-url` to its frontmatter.
+
+To manage an existing Confluence page from Obsidian, create a note and set its `connie-page-id` property to the page ID.
+
+**Note:** By default, the plugin doesn't overwrite a page that another user edited last. To overwrite those edits, turn on **Overwrite other users' edits**. Check the conflict first, because the other user's changes are lost.
+
+## Choose which notes are published
+
+The plugin publishes a note if any of the following are true:
+
+- The note is inside **Folder to publish**.
+- The note has a tag that's listed in **Tags to publish**.
+- The note's frontmatter contains `connie-publish: true`.
+
+Two rules take priority:
+
+- A note with `connie-publish: false` is never published.
+- A note inside a folder listed in **Excluded folders** is never published, even if it has `connie-publish: true`.
+
+To include or exclude the active note, run **Enable publishing for current note** or **Disable publishing for current note**. To edit the note's Confluence properties, such as its title, labels, and content type, run **Edit page settings for current note**.
 
 ### Page hierarchy
 
-The parent page is the root of the published tree. Folders become pages. A folder note named after the folder, or `index.md`, `README.md` or `readme.md`, supplies that folder page's content.
+The parent page is the root of the published tree, and each folder becomes a page. To give a folder page its own content, add a folder note named after the folder, or named `index.md`, `README.md`, or `readme.md`.
 
-### Embeds, diagrams and equations
+## Diagrams, equations, and embeds
 
-- Note embeds such as `![[Shared Notes/Release Checklist]]` are expanded before publishing.
-- Mermaid diagrams and LaTeX equations are rendered on your computer.
-- Kroki (`kroki-*` code blocks) and PlantUML (`plantuml`, `puml`, `uml` code blocks) are off by default. Turning them on sends diagram source to the server you configure, so use one you trust, such as a self-hosted instance.
-- Dataview `TABLE`, `LIST` and `TASK` queries can be published as their results when **Publish Dataview results** is on and Dataview is installed.
+- **Embeds:** The plugin expands note embeds, such as `![[Shared Notes/Release Checklist]]`, before publishing.
+- **Mermaid and LaTeX:** The plugin renders Mermaid diagrams and LaTeX equations on your computer.
+- **Kroki and PlantUML:** Kroki (`kroki-*` code blocks) and PlantUML (`plantuml`, `puml`, and `uml` code blocks) are off by default. When you turn them on, the plugin sends diagram source to the server that you configure. Use a server that you trust, such as a self-hosted instance.
+- **Dataview:** If Dataview is installed and **Publish Dataview results** is on, the plugin publishes the results of Dataview `TABLE`, `LIST`, and `TASK` queries. DataviewJS and inline queries aren't supported.
 
-## Development
+## Set up a development environment
 
-Requires Node.js 24.15 or later.
+### Before you begin
+
+Install the following:
+
+- [Node.js](https://nodejs.org/) 24.15 or later.
+- [Git](https://git-scm.com/).
+- Obsidian 1.11.4 or later.
+
+### Build the plugin
+
+1. Create a vault for testing. Don't use a vault that contains notes you care about.
+1. Clone this repository into the vault's plugin folder:
+
+   ```bash
+   git clone https://github.com/FlyxHub/obsidian-integration-plus.git \
+     "VAULT_PATH/.obsidian/plugins/confluence-integration"
+   ```
+
+   Replace `VAULT_PATH` with the path to your test vault.
+
+1. Install dependencies:
+
+   ```bash
+   cd "VAULT_PATH/.obsidian/plugins/confluence-integration"
+   npm install
+   ```
+
+1. Start a watch build:
+
+   ```bash
+   npm run dev
+   ```
+
+   The build writes `main.js` to the plugin folder and rebuilds it when you save a source file.
+
+1. In Obsidian, go to **Settings** > **Community plugins**, and then turn on **Confluence Integration**.
+
+To load a new build, turn the plugin off and on again under **Settings** > **Community plugins**. To reload it automatically on every build, install the [Hot-Reload](https://github.com/pjeby/hot-reload) plugin.
+
+The following table describes the npm scripts:
+
+| Command | Description |
+| --- | --- |
+| `npm run dev` | Builds `main.js` with inline source maps, and rebuilds on changes. |
+| `npm run build` | Type-checks the code, and then builds a minified production `main.js`. |
+| `npm run typecheck` | Type-checks the code without building. |
+| `npm test` | Runs the unit tests with Vitest. |
+| `npm run lint` | Lints `src/` and `package.json` with ESLint and `eslint-plugin-obsidianmd`. |
+| `npm run fmt` | Formats the source with Prettier. |
+| `npm run fmt:check` | Checks formatting without changing files. |
+
+## Test the plugin
+
+Run the automated checks before every commit, and test in Obsidian before every release.
+
+### Run the automated checks
+
+1. Run the type checker, linter, and unit tests:
+
+   ```bash
+   npm run typecheck
+   npm run lint
+   npm test
+   ```
+
+1. Check formatting:
+
+   ```bash
+   npm run fmt:check
+   ```
+
+All four commands must finish without errors. The linter uses `eslint-plugin-obsidianmd`, which checks many of the rules that Obsidian applies when it reviews plugins.
+
+To run one test file, pass its path. To run tests whose names match a pattern, use `-t`:
 
 ```bash
-npm install
-npm run dev        # watch build; writes main.js in this folder
-npm run build      # type-check and production build
-npm test           # unit tests (Vitest)
-npm run lint       # ESLint with eslint-plugin-obsidianmd
+npx vitest run src/settings.test.ts
+npx vitest run -t "moves a plaintext API token"
 ```
 
-Clone the repository into `<vault>/.obsidian/plugins/confluence-integration`, run `npm run dev`, and reload the plugin in Obsidian after each build.
+Unit tests run in Node.js, where the `obsidian` package provides only types. Code that you want to unit test must import from `obsidian` with `import type` only. For an example, see `src/settings.ts`.
 
-## Issues
+### Test in Obsidian
 
-Report conversion and publishing problems to [markdown-confluence/markdown-confluence](https://github.com/markdown-confluence/markdown-confluence/issues), where the shared library is developed.
+#### Before you begin
+
+- Set up a [development environment](#set-up-a-development-environment).
+- Create a Confluence space or parent page that's only for testing. Publishing creates and changes real pages.
+
+#### Test publishing
+
+1. Run `npm run dev`, and then reload the plugin.
+1. Open the developer console. On Windows and Linux, press `Ctrl+Shift+I`. On macOS, press `Cmd+Option+I`.
+1. [Connect to Confluence](#connect-to-confluence), using your test page as the parent page.
+1. In the folder to publish, create a note that contains a heading, an image, and a Mermaid diagram.
+1. Run **Publish all notes**.
+1. Verify the following:
+   - The results dialog reports no failures.
+   - The page in Confluence shows the heading, image, and diagram.
+   - The note's frontmatter contains `connie-page-id` and `connie-page-url`.
+   - The developer console shows no errors.
+1. Edit the note, publish it again, and verify that the plugin updates the same Confluence page.
+1. Start a publish of several notes, and then run **Cancel publishing after the current request**. Verify that the publish stops.
+
+#### Test the credential migration
+
+This test confirms that the plugin moves plaintext credentials from older versions into secret storage.
+
+1. Turn off the plugin.
+1. Open `data.json` in the plugin folder, and set `"atlassianApiToken"` to `"test-token"`.
+1. Turn on the plugin. Verify that a notice says that credentials were moved to secret storage.
+1. Open `data.json` again. Verify that `atlassianApiToken` is an empty string and that `apiTokenSecretName` contains a secret name.
+
+#### Check startup time
+
+1. Go to **Settings** > **General** > **Advanced**.
+1. Click the stopwatch icon, and check how long **Confluence Integration** takes to load.
+
+The plugin loads settings and registers commands at startup. It shouldn't take noticeably longer than other plugins.
+
+## Release the plugin
+
+A release is a GitHub release whose tag matches the version in `manifest.json` exactly, without a `v` prefix. Obsidian downloads `main.js`, `manifest.json`, and `styles.css` from the release assets.
+
+### Before you begin
+
+- Merge the changes that you want to release into `main`.
+- [Test the plugin](#test-the-plugin), including in Obsidian.
+- If the release uses Obsidian APIs that are newer than the current `minAppVersion`, update `minAppVersion` in `manifest.json`. To find when an API was added, see the `@since` tag in `node_modules/obsidian/obsidian.d.ts`. The linter also reports APIs that are newer than `minAppVersion`.
+
+### Create the release
+
+1. Switch to `main`, and get the latest changes:
+
+   ```bash
+   git switch main
+   git pull
+   ```
+
+1. Update the version number:
+
+   ```bash
+   npm version RELEASE_TYPE
+   ```
+
+   Replace `RELEASE_TYPE` with `patch`, `minor`, or `major`. Use `major` for changes that break existing settings or behavior, such as raising `minAppVersion`.
+
+   This command updates `package.json`, runs `version-bump.mjs` to copy the version into `manifest.json` and add it to `versions.json`, commits the changes, and creates a Git tag such as `7.1.0`.
+
+1. Build the production files:
+
+   ```bash
+   npm run build
+   ```
+
+1. Push the commit and the tag:
+
+   ```bash
+   git push --follow-tags
+   ```
+
+1. On GitHub, create the release:
+   1. Go to the repository's **Releases** page, and then click **Draft a new release**.
+   1. In **Choose a tag**, select the tag that `npm version` created.
+   1. Set the release title to the version number.
+   1. In the description, summarize the changes. If the release raises `minAppVersion`, or changes settings or credential storage, say so.
+   1. Attach `main.js`, `manifest.json`, and `styles.css` as binary files.
+   1. Click **Publish release**.
+
+   If you use the [GitHub CLI](https://cli.github.com/), you can do this step with one command instead:
+
+   ```bash
+   gh release create VERSION main.js manifest.json styles.css --title VERSION --notes "RELEASE_NOTES"
+   ```
+
+   Replace `VERSION` with the new version, such as `7.1.0`, and `RELEASE_NOTES` with a summary of the changes.
+
+1. Install the release in a clean test vault by following [Install the plugin](#install-the-plugin), and verify that it loads.
+
+**Note:** Don't commit `main.js`. It's listed in `.gitignore` and belongs only in release assets.
+
+### Submit to the community directory
+
+This plugin is a fork. Obsidian lists a fork in its community directory only if the original author approves it publicly, or if the original author has been unreachable and inactive for at least six months. For details, see Obsidian's [developer policies](https://docs.obsidian.md/Developer+policies). Before you submit, also give the plugin its own `id`, `name`, and `author` in `manifest.json`.
+
+## Report issues
+
+To report a problem with converting or publishing content, open an issue in the [markdown-confluence repository](https://github.com/markdown-confluence/markdown-confluence/issues), where the shared library is developed. To report a problem that's specific to this plugin, open an issue in [this repository](https://github.com/FlyxHub/obsidian-integration-plus/issues).
 
 ## License
 
-Licensed under the [Apache 2.0](LICENSE) License.
+This project is licensed under the [Apache 2.0 License](LICENSE).
 
-The Apache license applies only to this Obsidian Confluence Integration ("Integration"), not to any third party's services, websites, content or platforms that the Integration lets you connect to. No license is granted to you by the licensors above to access any third-party service, website, content or platform. You are solely responsible for obtaining licenses from those third parties and complying with their terms. Do not disclose any passwords, credentials or tokens to a third-party service in your contributions to this project.
+The Apache license applies only to the Obsidian Confluence Integration ("Integration"). It doesn't apply to any third party's services, websites, content, or platforms that the Integration lets you connect to. The licensors listed in this document don't grant you a license to access any third-party service, website, content, or platform. You're responsible for getting licenses from those third parties and for complying with their terms. Don't disclose passwords, credentials, or tokens to any third-party service in your contributions to this project.
