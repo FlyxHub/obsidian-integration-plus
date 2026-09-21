@@ -9,6 +9,8 @@ export interface SyncBase {
 	markdown: string;
 	/** The `MERGE_FORMAT` that produced `markdown`; 1 for snapshots saved before it existed. */
 	format: number;
+	/** Pages linked from the content that had no note, so their links stayed web links. */
+	unresolvedLinks: string[];
 }
 
 export interface SyncStateStore {
@@ -48,8 +50,17 @@ export function createSyncStateStore(adapter: DataAdapter, directory: string): S
 
 function parseBase(value: unknown, pageId: string): SyncBase | undefined {
 	if (!value || typeof value !== "object") return undefined;
-	const { version, title, markdown, format } = value as Record<string, unknown>;
+	const { version, title, markdown, format, unresolvedLinks } = value as Record<string, unknown>;
 	if (typeof version !== "number" || typeof title !== "string" || typeof markdown !== "string")
 		return undefined;
-	return { pageId, version, title, markdown, format: typeof format === "number" ? format : 1 };
+	return {
+		pageId,
+		version,
+		title,
+		markdown,
+		format: typeof format === "number" ? format : 1,
+		unresolvedLinks: Array.isArray(unresolvedLinks)
+			? unresolvedLinks.filter((id): id is string => typeof id === "string")
+			: [],
+	};
 }

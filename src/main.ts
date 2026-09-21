@@ -44,10 +44,11 @@ import { createDataviewTransformer } from "./DataviewTransformer";
 import { krokiFetch } from "./KrokiFetch";
 import { createObsidianConfluenceClient } from "./ObsidianAuthentication";
 import { ObsidianPlatformLive } from "./effects/ObsidianPlatform";
-import { MERGE_FORMAT, adfToMergeMarkdown } from "./sync/adfMarkdown";
+import { MERGE_FORMAT } from "./sync/adfMarkdown";
 import { createConfluenceRemote, type ConfluenceRemote } from "./sync/confluenceRemote";
 import { createObsidianPullVault, linkedPageId } from "./sync/obsidianVault";
-import { PullService } from "./sync/pull";
+import { createPageLinkResolver } from "./sync/pageLinks";
+import { PullService, convertPage } from "./sync/pull";
 import { PullResultsModal, summarizePull } from "./sync/PullResultsModal";
 import { checkBeforePublish, type NoteToPublish } from "./sync/publishGate";
 import { createSyncStateStore, type SyncStateStore } from "./sync/syncState";
@@ -385,6 +386,7 @@ export default class ConfluencePlugin extends Plugin {
 				const importNew = settings.importNewPages && !pageIds && settings.confluenceParentId;
 				const report = await service.pull({
 					confluenceBaseUrl: settings.confluenceBaseUrl,
+					confluenceSiteUrl: settings.confluenceSiteUrl,
 					...(pageIds ? { pageIds } : {}),
 					...(importNew
 						? {
@@ -485,6 +487,9 @@ export default class ConfluencePlugin extends Plugin {
 		uploads: UploadResults["filesUploadResult"],
 	): Promise<UploadResults["failedFiles"]> {
 		const errors: UploadResults["failedFiles"] = [];
+		const settings = this.resolvedSettings();
+		const vault = createObsidianPullVault(this.app);
+		const resolve = createPageLinkResolver(vault.linkedNotes(), vault.notePaths());
 		for (const upload of uploads) {
 			const { pageId, absoluteFilePath } = upload.adfFile;
 			if (!pageId) continue;
@@ -493,12 +498,14 @@ export default class ConfluencePlugin extends Plugin {
 				if (upload.contentResult === "same" && existing?.format === MERGE_FORMAT) continue;
 				const page = await remote.getPage(pageId);
 				if (!page) continue;
+				const converted = convertPage(page.adf, settings, resolve);
 				await this.syncState.set({
 					pageId,
 					version: page.version,
 					title: page.title,
-					markdown: adfToMergeMarkdown(page.adf, this.resolvedSettings().confluenceBaseUrl),
+					markdown: converted.markdown,
 					format: MERGE_FORMAT,
+					unresolvedLinks: converted.unresolvedLinks,
 				});
 			} catch (error) {
 				errors.push({

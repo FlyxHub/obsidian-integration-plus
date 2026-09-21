@@ -36,6 +36,8 @@ export function createObsidianPullVault(app: App): PullVault {
 			return notes;
 		},
 
+		notePaths: () => app.vault.getMarkdownFiles().map((file) => file.path),
+
 		read: (path) => app.vault.read(fileAt(path)),
 
 		async replace(path, expected, next) {

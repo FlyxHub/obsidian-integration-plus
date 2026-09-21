@@ -116,6 +116,8 @@ If a page's title changed in Confluence, the plugin sets the note's `connie-titl
 
 If a page was deleted in Confluence, the plugin reports it and keeps your note.
 
+Links to other Confluence pages become Obsidian wikilinks when the linked page has a note, such as `[[Local Admin Access]]` or `[[Local Admin Access|the admin page]]`. A link to a section becomes a heading link, such as `[[Local Admin Access#Steps to follow]]`. Links to pages that don't have a note yet stay web links; after a later pull imports those pages, the next pull turns the links into wikilinks. When you publish, wikilinks become links to the Confluence pages again.
+
 ### Resolve conflicts
 
 A conflict happens when a block changed both in Obsidian and in Confluence. The plugin keeps both versions in the note, between Git-style markers:
@@ -167,6 +169,9 @@ The plugin skips a page, and says why in the results dialog, in these cases:
 - Pull doesn't download attachments. Images and other attachments stay in Confluence, and the note refers to them in an `adf` code block, which is restored exactly when you publish.
 - Content that Markdown can't represent, such as status lozenges, page layouts, and custom panels with their own icon or color, appears as an `adf` code block. Edit these blocks in Confluence.
 - For security, pulled code blocks that plugins run as JavaScript, such as `dataviewjs` and `js-engine`, become plain `text` code blocks, and Dataview inline JavaScript (`` `$= ...` ``) is disabled. This prevents anyone who can edit a Confluence page from running code in your vault. Code blocks that you wrote in Obsidian aren't changed.
+- Short share links, such as `https://example.atlassian.net/wiki/x/AbCd`, don't contain a page ID, so they stay web links.
+- Confluence builds section anchors from heading text, so a heading link can be approximate when a heading contains hyphens or punctuation. The link still opens the right note.
+- A smart link card to a page becomes a wikilink, and publishes back as an ordinary link with the page title.
 - Pull applies changes line by line. If you and someone in Confluence edit the same paragraph, the whole paragraph is a conflict.
 
 ## Diagrams, equations, and embeds
