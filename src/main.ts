@@ -58,6 +58,8 @@ import {
 } from "./settings";
 
 const PUBLISH_FLAG = "connie-publish";
+/** Manifest ID of the plugin this one was forked from. */
+const LEGACY_PLUGIN_ID = "confluence-integration";
 /** The publisher's error when a page was last edited by someone else. */
 const EDITED_BY_OTHER_USER = "Page last updated by another user";
 
@@ -200,15 +202,40 @@ export default class ConfluencePlugin extends Plugin {
 	}
 
 	async loadSettings() {
-		this.settings = mergeSettings(await this.loadData());
-		if (migrateSecretsToStorage(this.settings, this.app.secretStorage)) {
-			await this.saveSettings();
+		let data: unknown = await this.loadData();
+		let importedLegacy = false;
+		if (data === null) {
+			data = await this.readLegacySettings();
+			importedLegacy = data !== undefined;
+		}
+		this.settings = mergeSettings(data);
+		const movedSecrets = migrateSecretsToStorage(this.settings, this.app.secretStorage);
+		if (!importedLegacy && !movedSecrets) {
+			this.buildLayers();
+			return;
+		}
+		await this.saveSettings();
+		if (importedLegacy)
+			new Notice("Imported your settings from the original Confluence Integration plugin.");
+		if (movedSecrets)
 			new Notice(
 				"Confluence credentials were moved from plugin data into Obsidian secret storage.",
 			);
-			return;
+	}
+
+	/**
+	 * Settings of the plugin this one was forked from, so switching doesn't lose them.
+	 * Read once, only while this plugin has no settings of its own. The adapter is used
+	 * because the Vault API doesn't index the config directory.
+	 */
+	private async readLegacySettings(): Promise<unknown> {
+		const path = normalizePath(`${this.app.vault.configDir}/plugins/${LEGACY_PLUGIN_ID}/data.json`);
+		try {
+			if (!(await this.app.vault.adapter.exists(path))) return undefined;
+			return JSON.parse(await this.app.vault.adapter.read(path)) as unknown;
+		} catch {
+			return undefined;
 		}
-		this.buildLayers();
 	}
 
 	async saveSettings() {

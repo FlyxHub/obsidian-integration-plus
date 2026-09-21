@@ -23,6 +23,7 @@ export default defineConfig([
 						"Obsidian",
 						"Atlassian",
 						"Atlassian Administration",
+						"Confluence Integration",
 						"Confluence",
 						"Jira",
 						"Mermaid",

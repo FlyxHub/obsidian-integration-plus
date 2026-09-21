@@ -1,12 +1,8 @@
-# Confluence Integration for Obsidian
+# Confluence Integration Plus
 
-Confluence Integration publishes notes from your Obsidian vault to [Atlassian Confluence](https://www.atlassian.com/software/confluence) Cloud, and pulls changes that people make in Confluence back into your notes. The plugin converts each note to [Atlassian Document Format (ADF)](https://developer.atlassian.com/cloud/jira/platform/apis/document/structure/) with the [`@markdown-confluence/lib`](https://www.npmjs.com/package/@markdown-confluence/lib) library, which the [markdown-confluence](https://github.com/markdown-confluence/markdown-confluence) project maintains. This repository contains only the Obsidian plugin.
+Confluence Integration Plus publishes notes from your Obsidian vault to [Atlassian Confluence](https://www.atlassian.com/software/confluence) Cloud, and pulls changes that people make in Confluence back into your notes. The plugin converts each note to [Atlassian Document Format (ADF)](https://developer.atlassian.com/cloud/jira/platform/apis/document/structure/) with the [`@markdown-confluence/lib`](https://www.npmjs.com/package/@markdown-confluence/lib) library, which the [markdown-confluence](https://github.com/markdown-confluence/markdown-confluence) project maintains. This repository contains only the Obsidian plugin.
 
 The plugin runs on desktop only and requires Obsidian 1.11.4 or later.
-
-Copyright © 2022 Atlassian Pty Ltd.
-
-Copyright © 2022 Atlassian US, Inc.
 
 ## Contents
 
@@ -21,7 +17,7 @@ Copyright © 2022 Atlassian US, Inc.
 - [Test the plugin](#test-the-plugin)
 - [Release the plugin](#release-the-plugin)
 - [Report issues](#report-issues)
-- [License](#license)
+- [Credits and license](#credits-and-license)
 
 ## Disclosures
 
@@ -30,16 +26,18 @@ Obsidian's developer policies require plugins to disclose the following behavior
 - **Account:** You need an Atlassian Cloud account with access to a Confluence site.
 - **Network use:** The plugin sends note content, attachments, labels, and page metadata over HTTPS to the Confluence site that you configure. When you pull, it reads pages from that site and writes their content into your notes. It contacts `auth.atlassian.com` and `api.atlassian.com` only to sign in with OAuth and to refresh tokens. If you turn on Kroki or PlantUML rendering, the plugin sends diagram source to the server that you configure. The plugin doesn't collect telemetry.
 - **Local network listener:** Browser OAuth sign-in starts a temporary HTTP listener on `127.0.0.1` at the callback port that you configure. The listener accepts one matching sign-in response, and then stops. It also stops when you cancel sign-in or after five minutes.
-- **Files other than notes:** To match your Obsidian theme in Mermaid diagrams, the plugin reads the active theme and enabled CSS snippets from the vault's configuration folder. To support pulling, it saves a snapshot of each published page in a `sync` folder inside the plugin's folder. The plugin doesn't read or write files outside the vault.
-- **Credentials:** The plugin keeps API tokens, client secrets, and OAuth tokens in Obsidian secret storage, not in the plugin's `data.json` file. Earlier versions stored the API token and the service-account client secret in `data.json`. The first time that this version loads, it moves those values into secret storage and removes them from `data.json`.
+- **Files other than notes:** To match your Obsidian theme in Mermaid diagrams, the plugin reads the active theme and enabled CSS snippets from the vault's configuration folder. To support pulling, it saves a snapshot of each published page in a `sync` folder inside the plugin's folder. The first time it loads, if it has no settings yet, it reads the settings of the original Confluence Integration plugin, if that plugin is installed. The plugin doesn't read or write files outside the vault.
+- **Credentials:** The plugin keeps API tokens, client secrets, and OAuth tokens in Obsidian secret storage, not in the plugin's `data.json` file. The original Confluence Integration plugin stored the API token and the service-account client secret in `data.json`. If this plugin finds those values, it moves them into secret storage and removes them from `data.json`.
 
 ## Install the plugin
 
 1. From the [releases page](https://github.com/FlyxHub/obsidian-integration-plus/releases), download `main.js`, `manifest.json`, and `styles.css`.
-1. In your vault, create the folder `.obsidian/plugins/confluence-integration`.
+1. In your vault, create the folder `.obsidian/plugins/confluence-integration-plus`.
 1. Copy the three files into that folder.
 1. Restart Obsidian.
-1. In Obsidian, go to **Settings** > **Community plugins**, and then turn on **Confluence Integration**.
+1. In Obsidian, go to **Settings** > **Community plugins**, and then turn on **Confluence Integration Plus**.
+
+If you used the original Confluence Integration plugin in this vault, this plugin imports its settings the first time it loads. Pages that the original plugin published stay linked to your notes through `connie-page-id`. To avoid publishing from both plugins, turn off the original plugin.
 
 ## Connect to Confluence
 
@@ -54,7 +52,7 @@ Obsidian's developer policies require plugins to disclose the following behavior
 
 ### Configure the plugin
 
-1. Go to **Settings** > **Confluence Integration**.
+1. Go to **Settings** > **Confluence Integration Plus**.
 1. In the **Authentication type** list, select your authentication type.
 1. In **Confluence API URL**, enter your site URL, such as `https://example.atlassian.net`. If you use a scoped API token, enter `https://api.atlassian.com/ex/confluence/CLOUD_ID` instead. Replace `CLOUD_ID` with your site's cloud ID.
 1. In **Confluence site URL**, enter the address that you open in a browser, such as `https://example.atlassian.net`.
@@ -193,7 +191,7 @@ Install the following:
 
    ```bash
    git clone https://github.com/FlyxHub/obsidian-integration-plus.git \
-     "VAULT_PATH/.obsidian/plugins/confluence-integration"
+     "VAULT_PATH/.obsidian/plugins/confluence-integration-plus"
    ```
 
    Replace `VAULT_PATH` with the path to your test vault.
@@ -201,7 +199,7 @@ Install the following:
 1. Install dependencies:
 
    ```bash
-   cd "VAULT_PATH/.obsidian/plugins/confluence-integration"
+   cd "VAULT_PATH/.obsidian/plugins/confluence-integration-plus"
    npm install
    ```
 
@@ -213,7 +211,7 @@ Install the following:
 
    The build writes `main.js` to the plugin folder and rebuilds it when you save a source file.
 
-1. In Obsidian, go to **Settings** > **Community plugins**, and then turn on **Confluence Integration**.
+1. In Obsidian, go to **Settings** > **Community plugins**, and then turn on **Confluence Integration Plus**.
 
 To load a new build, turn the plugin off and on again under **Settings** > **Community plugins**. To reload it automatically on every build, install the [Hot-Reload](https://github.com/pjeby/hot-reload) plugin.
 
@@ -310,7 +308,7 @@ This test confirms that the plugin moves plaintext credentials from older versio
 #### Check startup time
 
 1. Go to **Settings** > **General** > **Advanced**.
-1. Click the stopwatch icon, and check how long **Confluence Integration** takes to load.
+1. Click the stopwatch icon, and check how long **Confluence Integration Plus** takes to load.
 
 The plugin loads settings and registers commands at startup. It shouldn't take noticeably longer than other plugins.
 
@@ -377,14 +375,20 @@ A release is a GitHub release whose tag matches the version in `manifest.json` e
 
 ### Submit to the community directory
 
-This plugin is a fork. Obsidian lists a fork in its community directory only if the original author approves it publicly, or if the original author has been unreachable and inactive for at least six months. For details, see Obsidian's [developer policies](https://docs.obsidian.md/Developer+policies). Before you submit, also give the plugin its own `id`, `name`, and `author` in `manifest.json`.
+This plugin is a fork. Obsidian lists a fork in its community directory only if the original author approves it publicly, or if the original author has been unreachable and inactive for at least six months. For details, see Obsidian's [developer policies](https://docs.obsidian.md/Developer+policies).
 
 ## Report issues
 
 To report a problem with converting or publishing content, open an issue in the [markdown-confluence repository](https://github.com/markdown-confluence/markdown-confluence/issues), where the shared library is developed. To report a problem that's specific to this plugin, open an issue in [this repository](https://github.com/FlyxHub/obsidian-integration-plus/issues).
 
-## License
+## Credits and license
+
+Confluence Integration Plus is a fork of the [Confluence Integration](https://github.com/markdown-confluence/obsidian-integration) plugin from the [markdown-confluence](https://github.com/markdown-confluence/markdown-confluence) project, and it uses that project's `@markdown-confluence/lib` library. The Apache 2.0 License requires this notice:
+
+Copyright © 2022 Atlassian Pty Ltd.
+
+Copyright © 2022 Atlassian US, Inc.
 
 This project is licensed under the [Apache 2.0 License](LICENSE).
 
-The Apache license applies only to the Obsidian Confluence Integration ("Integration"). It doesn't apply to any third party's services, websites, content, or platforms that the Integration lets you connect to. The licensors listed in this document don't grant you a license to access any third-party service, website, content, or platform. You're responsible for getting licenses from those third parties and for complying with their terms. Don't disclose passwords, credentials, or tokens to any third-party service in your contributions to this project.
+The Apache license applies only to this plugin. It doesn't apply to any third party's services, websites, content, or platforms that the plugin lets you connect to. The licensors listed in this document don't grant you a license to access any third-party service, website, content, or platform. You're responsible for getting licenses from those third parties and for complying with their terms. Don't disclose passwords, credentials, or tokens to any third-party service in your contributions to this project.

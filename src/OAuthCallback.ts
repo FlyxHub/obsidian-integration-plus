@@ -53,7 +53,7 @@ export function receiveOAuthCode(
 					Connection: "close",
 				});
 				response.end(
-					`<!doctype html><html lang="en"><meta charset="utf-8"><title>Confluence login</title><body><h1>Markdown Confluence</h1><p>${message}</p><p>You can close this tab and return to Obsidian.</p></body></html>`,
+					`<!doctype html><html lang="en"><meta charset="utf-8"><title>Confluence login</title><body><h1>Confluence Integration Plus</h1><p>${message}</p><p>You can close this tab and return to Obsidian.</p></body></html>`,
 					complete,
 				);
 			};
