@@ -1,0 +1,42 @@
+.confluence-publish-status {
+	cursor: var(--cursor);
+}
+
+.confluence-settings-validation:not(:empty) {
+	color: var(--text-error);
+	padding-bottom: var(--size-4-2);
+	border-bottom: var(--border-width) solid var(--background-modifier-border);
+}
+
+.confluence-results .confluence-error,
+.confluence-page-settings .confluence-field-error {
+	color: var(--text-error);
+}
+
+.confluence-results-table {
+	margin-block: var(--size-4-3);
+}
+
+.confluence-results-table th,
+.confluence-results-table td {
+	padding: var(--size-2-2) var(--size-4-2);
+	text-align: start;
+}
+
+.confluence-page-settings table {
+	width: 100%;
+	border-collapse: collapse;
+}
+
+.confluence-page-settings th,
+.confluence-page-settings td {
+	padding: var(--size-2-2) var(--size-4-1);
+	text-align: start;
+	vertical-align: top;
+}
+
+.confluence-array-input {
+	display: flex;
+	flex-direction: column;
+	gap: var(--size-2-2);
+}

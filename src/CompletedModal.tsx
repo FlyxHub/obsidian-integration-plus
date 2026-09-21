@@ -1,6 +1,6 @@
 import { Modal, App } from "obsidian";
-import ReactDOM from "react-dom";
-import React, { useState } from "react";
+import { createRoot, Root } from "react-dom/client";
+import { StrictMode, useState } from "react";
 import { UploadAdfFileResult } from "@markdown-confluence/lib";
 
 export interface FailedFile {
@@ -18,143 +18,145 @@ export interface UploadResultsProps {
 	uploadResults: UploadResults;
 }
 
-const CompletedView: React.FC<UploadResultsProps> = ({ uploadResults }) => {
+/** Page URLs come from the Confluence API; only link to web pages. */
+function safePageUrl(url: string | undefined): string | undefined {
+	if (!url || !URL.canParse(url)) return undefined;
+	return new URL(url).protocol === "https:" ? url : undefined;
+}
+
+const UpdatedFiles = ({
+	results,
+	type,
+}: {
+	results: UploadAdfFileResult[];
+	type: "content" | "image" | "label";
+}) => (
+	<ul>
+		{results
+			.filter((result) => result[`${type}Result`] === "updated")
+			.map((result) => {
+				const href = safePageUrl(result.adfFile.pageUrl);
+				const path = result.adfFile.absoluteFilePath;
+				return <li key={path}>{href ? <a href={href}>{path}</a> : path}</li>;
+			})}
+	</ul>
+);
+
+const CompletedView = ({ uploadResults }: UploadResultsProps) => {
 	const { errorMessage, failedFiles, filesUploadResult } = uploadResults;
 	const [expanded, setExpanded] = useState(false);
+
+	if (errorMessage) {
+		return (
+			<div className="confluence-results">
+				<p className="confluence-error">{errorMessage}</p>
+				{failedFiles.length > 0 && (
+					<ul>
+						{failedFiles.map((file) => (
+							<li key={file.fileName}>
+								<strong>{file.fileName}</strong>: {file.reason}
+							</li>
+						))}
+					</ul>
+				)}
+			</div>
+		);
+	}
 
 	const countResults = {
 		content: { same: 0, updated: 0 },
 		images: { same: 0, updated: 0 },
 		labels: { same: 0, updated: 0 },
 	};
-
-	filesUploadResult.forEach((result) => {
+	for (const result of filesUploadResult) {
 		countResults.content[result.contentResult]++;
 		countResults.images[result.imageResult]++;
 		countResults.labels[result.labelResult]++;
-	});
-
-	const renderUpdatedFiles = (type: "content" | "image" | "label") => {
-		return filesUploadResult
-			.filter((result) => result[`${type}Result`] === "updated")
-			.map((result, index) => (
-				<li key={index}>
-					<a href={result.adfFile.pageUrl}>
-						{result.adfFile.absoluteFilePath}
-					</a>
-				</li>
-			));
-	};
+	}
 
 	return (
-		<div className="upload-results">
-			<div>
-				<h1>Confluence Publish</h1>
-			</div>
-			{errorMessage ? (
-				<div className="error-message">
-					<h3>Error</h3>
-					<p>{errorMessage}</p>
+		<div className="confluence-results">
+			<p>{filesUploadResult.length} file(s) published successfully.</p>
+
+			{failedFiles.length > 0 && (
+				<div className="confluence-failed">
+					<p>{failedFiles.length} file(s) failed to publish:</p>
+					<ul>
+						{failedFiles.map((file) => (
+							<li key={file.fileName}>
+								<strong>{file.fileName}</strong>: {file.reason}
+							</li>
+						))}
+					</ul>
 				</div>
-			) : (
-				<>
-					<div className="successful-uploads">
-						<h3>Successful Uploads</h3>
-						<p>
-							{filesUploadResult.length} file(s) uploaded
-							successfully.
-						</p>
-					</div>
+			)}
 
-					{failedFiles.length > 0 && (
-						<div className="failed-uploads">
-							<h3>Failed Uploads</h3>
-							<p>
-								{failedFiles.length} file(s) failed to upload.
-							</p>
-							<ul>
-								{failedFiles.map((file, index) => (
-									<li key={index}>
-										<strong>{file.fileName}</strong>:{" "}
-										{file.reason}
-									</li>
-								))}
-							</ul>
-						</div>
-					)}
+			<table className="confluence-results-table">
+				<thead>
+					<tr>
+						<th>Type</th>
+						<th>Unchanged</th>
+						<th>Updated</th>
+					</tr>
+				</thead>
+				<tbody>
+					<tr>
+						<td>Content</td>
+						<td>{countResults.content.same}</td>
+						<td>{countResults.content.updated}</td>
+					</tr>
+					<tr>
+						<td>Images</td>
+						<td>{countResults.images.same}</td>
+						<td>{countResults.images.updated}</td>
+					</tr>
+					<tr>
+						<td>Labels</td>
+						<td>{countResults.labels.same}</td>
+						<td>{countResults.labels.updated}</td>
+					</tr>
+				</tbody>
+			</table>
 
-					<table className="result-table">
-						<thead>
-							<tr>
-								<th>Type</th>
-								<th>Same</th>
-								<th>Updated</th>
-							</tr>
-						</thead>
-						<tbody>
-							<tr>
-								<td>Content</td>
-								<td>{countResults.content.same}</td>
-								<td>{countResults.content.updated}</td>
-							</tr>
-							<tr>
-								<td>Images</td>
-								<td>{countResults.images.same}</td>
-								<td>{countResults.images.updated}</td>
-							</tr>
-							<tr>
-								<td>Labels</td>
-								<td>{countResults.labels.same}</td>
-								<td>{countResults.labels.updated}</td>
-							</tr>
-						</tbody>
-					</table>
-					<div className="expandable-section">
-						<button onClick={() => setExpanded(!expanded)}>
-							{expanded ? "Collapse" : "Expand"} Updated Files
-						</button>
-						{expanded && (
-							<div className="updated-files">
-								<div className="updated-content">
-									<h4>Updated Content</h4>
-									<ul>{renderUpdatedFiles("content")}</ul>
-								</div>
-								<div className="updated-images">
-									<h4>Updated Images</h4>
-									<ul>{renderUpdatedFiles("image")}</ul>
-								</div>
-								<div className="updated-labels">
-									<h4>Updated Labels</h4>
-									<ul>{renderUpdatedFiles("label")}</ul>
-								</div>
-							</div>
-						)}
-					</div>
-				</>
+			<button type="button" onClick={() => setExpanded(!expanded)}>
+				{expanded ? "Hide updated files" : "Show updated files"}
+			</button>
+			{expanded && (
+				<div className="confluence-updated-files">
+					<h4>Updated content</h4>
+					<UpdatedFiles results={filesUploadResult} type="content" />
+					<h4>Updated images</h4>
+					<UpdatedFiles results={filesUploadResult} type="image" />
+					<h4>Updated labels</h4>
+					<UpdatedFiles results={filesUploadResult} type="label" />
+				</div>
 			)}
 		</div>
 	);
 };
 
 export class CompletedModal extends Modal {
-	uploadResults: UploadResultsProps;
+	private readonly props: UploadResultsProps;
+	private root: Root | null = null;
 
-	constructor(app: App, uploadResults: UploadResultsProps) {
+	constructor(app: App, props: UploadResultsProps) {
 		super(app);
-		this.uploadResults = uploadResults;
+		this.props = props;
 	}
 
 	override onOpen() {
-		const { contentEl } = this;
-		ReactDOM.render(
-			React.createElement(CompletedView, this.uploadResults),
-			contentEl,
+		this.setTitle(this.props.uploadResults.errorMessage ? "Publish failed" : "Publish finished");
+		this.root = createRoot(this.contentEl);
+		this.root.render(
+			<StrictMode>
+				<CompletedView {...this.props} />
+			</StrictMode>,
 		);
 	}
 
 	override onClose() {
-		const { contentEl } = this;
-		ReactDOM.unmountComponentAtNode(contentEl);
-		contentEl.empty();
+		this.root?.unmount();
+		this.root = null;
+		this.contentEl.empty();
 	}
 }

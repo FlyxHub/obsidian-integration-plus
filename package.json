@@ -1,35 +1,60 @@
 {
-    "name": "obsidian-confluence",
-    "version": "5.5.3",
-    "description": "This library allows you to publish your notes to Confluence",
-    "main": "main.js",
-    "type": "module",
-    "scripts": {
-        "dev": "node esbuild.config.mjs",
-        "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
-        "fmt": "npx prettier --write src/",
-        "lint": "eslint --ignore-path ../../.eslintignore --ext .jsx,tsx,.js,.ts src/",
-        "prettier-check": "npx prettier --check src/",
-        "version": "node version-bump.mjs && git add manifest.json versions.json"
-    },
-    "keywords": [],
-    "author": "andymac4182",
-    "license": "Apache 2.0",
-    "devDependencies": {
-        "@types/mime-types": "^2.1.1",
-        "@types/react-dom": "^18.0.11",
-        "obsidian": "^1.1.1"
-    },
-    "dependencies": {
-        "@markdown-confluence/lib": "^5.5.1",
-        "@markdown-confluence/mermaid-electron-renderer": "^5.5.1",
-        "@types/node": "^20.0.0",
-        "@typescript-eslint/eslint-plugin": "^5.29.0",
-        "@typescript-eslint/parser": "^5.29.0",
-        "builtin-modules": "^3.3.0",
-        "esbuild": "^0.17.3",
-        "react": "^18.3.1",
-        "tslib": "^2.4.0",
-        "typescript": "^4.7.4"
-    }
+	"name": "confluence-integration-plus",
+	"version": "1.0.0",
+	"description": "Publish notes to Atlassian Confluence and pull changes made in Confluence back into your vault.",
+	"private": true,
+	"main": "main.js",
+	"type": "module",
+	"engines": {
+		"node": ">=24.15.0"
+	},
+	"scripts": {
+		"dev": "node esbuild.config.mjs",
+		"build": "tsc --noEmit && node esbuild.config.mjs production",
+		"typecheck": "tsc --noEmit",
+		"lint": "eslint src package.json",
+		"fmt": "prettier --write \"src/**/*.{ts,tsx}\"",
+		"fmt:check": "prettier --check \"src/**/*.{ts,tsx}\"",
+		"test": "vitest run",
+		"version": "node version-bump.mjs && git add manifest.json versions.json"
+	},
+	"keywords": [],
+	"author": "Flyx",
+	"license": "Apache-2.0",
+	"dependencies": {
+		"@markdown-confluence/lib": "7.0.0",
+		"@markdown-confluence/mermaid-electron-renderer": "7.0.0",
+		"@markdown-confluence/plantuml-renderer": "7.0.0",
+		"effect": "4.0.0-rc.112",
+		"node-diff3": "3.2.1",
+		"react": "^19.2.7",
+		"react-dom": "^19.2.7"
+	},
+	"devDependencies": {
+		"@effect/vitest": "4.0.0-rc.112",
+		"@eslint/js": "^9.30.1",
+		"@types/node": "^24.0.0",
+		"@types/react": "^19.2.15",
+		"@types/react-dom": "^19.2.3",
+		"esbuild": "^0.28.2",
+		"eslint": "^9.30.1",
+		"eslint-plugin-obsidianmd": "^0.4.2",
+		"mermaid": "^11.16.1",
+		"obsidian": "1.12.3",
+		"prettier": "^3.6.0",
+		"tslib": "2.8.1",
+		"typescript": "^5.9.0",
+		"typescript-eslint": "^8.35.1",
+		"vitest": "4.1.11"
+	},
+	"overrides": {
+		"@effect/platform-node-shared": "4.0.0-rc.112"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/FlyxHub/obsidian-integration-plus.git"
+	},
+	"bugs": {
+		"url": "https://github.com/FlyxHub/obsidian-integration-plus/issues"
+	}
 }
