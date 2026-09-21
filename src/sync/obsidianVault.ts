@@ -1,4 +1,5 @@
 import { App, TFile, TFolder, normalizePath } from "obsidian";
+import type { MediaVault } from "./media";
 import type { PullVault } from "./pull";
 
 export const PAGE_ID_KEY = "connie-page-id";
@@ -10,7 +11,7 @@ export function linkedPageId(app: App, file: TFile): string | undefined {
 	return typeof value === "string" && /^\d+$/.test(value.trim()) ? value.trim() : undefined;
 }
 
-export function createObsidianPullVault(app: App): PullVault {
+export function createObsidianPullVault(app: App): PullVault & MediaVault {
 	const fileAt = (path: string) => {
 		const file = app.vault.getFileByPath(normalizePath(path));
 		if (!file) throw new Error(`Note not found: ${path}`);
@@ -37,6 +38,14 @@ export function createObsidianPullVault(app: App): PullVault {
 		},
 
 		notePaths: () => app.vault.getMarkdownFiles().map((file) => file.path),
+
+		filePaths: () => app.vault.getFiles().map((file) => file.path),
+
+		async writeBinary(path, data) {
+			const filePath = normalizePath(path);
+			await ensureFolder(filePath.slice(0, Math.max(0, filePath.lastIndexOf("/"))));
+			await app.vault.createBinary(filePath, Uint8Array.from(data).buffer);
+		},
 
 		read: (path) => app.vault.read(fileAt(path)),
 

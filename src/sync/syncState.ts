@@ -11,11 +11,16 @@ export interface SyncBase {
 	format: number;
 	/** Pages linked from the content that had no note, so their links stayed web links. */
 	unresolvedLinks: string[];
+	/** Media file IDs with no local copy, so they stayed `adf` fences. */
+	unresolvedMedia: string[];
 }
 
 export interface SyncStateStore {
 	get(pageId: string): Promise<SyncBase | undefined>;
 	set(base: SyncBase): Promise<void>;
+	/** Media file ID → vault path of its local copy. */
+	getMedia(): Promise<Record<string, string>>;
+	setMedia(map: Record<string, string>): Promise<void>;
 }
 
 const PAGE_ID = /^\d{1,32}$/;
@@ -40,6 +45,19 @@ export function createSyncStateStore(adapter: DataAdapter, directory: string): S
 				return undefined;
 			}
 		},
+		async getMedia() {
+			const path = `${directory}/media.json`;
+			if (!(await adapter.exists(path))) return {};
+			try {
+				return parseMediaMap(JSON.parse(await adapter.read(path)));
+			} catch {
+				return {};
+			}
+		},
+		async setMedia(map) {
+			if (!(await adapter.exists(directory))) await adapter.mkdir(directory);
+			await adapter.write(`${directory}/media.json`, JSON.stringify(map));
+		},
 		async set(base) {
 			const path = pathFor(base.pageId);
 			if (!(await adapter.exists(directory))) await adapter.mkdir(directory);
@@ -50,7 +68,10 @@ export function createSyncStateStore(adapter: DataAdapter, directory: string): S
 
 function parseBase(value: unknown, pageId: string): SyncBase | undefined {
 	if (!value || typeof value !== "object") return undefined;
-	const { version, title, markdown, format, unresolvedLinks } = value as Record<string, unknown>;
+	const { version, title, markdown, format, unresolvedLinks, unresolvedMedia } = value as Record<
+		string,
+		unknown
+	>;
 	if (typeof version !== "number" || typeof title !== "string" || typeof markdown !== "string")
 		return undefined;
 	return {
@@ -59,8 +80,29 @@ function parseBase(value: unknown, pageId: string): SyncBase | undefined {
 		title,
 		markdown,
 		format: typeof format === "number" ? format : 1,
-		unresolvedLinks: Array.isArray(unresolvedLinks)
-			? unresolvedLinks.filter((id): id is string => typeof id === "string")
-			: [],
+		unresolvedLinks: stringsOf(unresolvedLinks),
+		unresolvedMedia: stringsOf(unresolvedMedia),
 	};
+}
+
+function stringsOf(value: unknown): string[] {
+	return Array.isArray(value)
+		? value.filter((entry): entry is string => typeof entry === "string")
+		: [];
+}
+
+/** Only vault-relative paths without `..` segments are accepted from the stored map. */
+function parseMediaMap(value: unknown): Record<string, string> {
+	const map: Record<string, string> = {};
+	if (!value || typeof value !== "object" || Array.isArray(value)) return map;
+	for (const [fileId, path] of Object.entries(value)) {
+		if (
+			typeof path === "string" &&
+			path &&
+			!path.startsWith("/") &&
+			!path.split("/").includes("..")
+		)
+			map[fileId] = path;
+	}
+	return map;
 }

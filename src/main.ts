@@ -15,6 +15,7 @@ import {
 	HttpKrokiRenderer,
 	KrokiRendererPlugin,
 	MarkdownConfluencePlatform,
+	type ConfluenceFetch,
 	type MarkdownSourceTransformer,
 	MarkdownSourceTransformerService,
 	MarkdownWorkspaceLive,
@@ -45,7 +46,10 @@ import { krokiFetch } from "./KrokiFetch";
 import { createObsidianConfluenceClient } from "./ObsidianAuthentication";
 import { ObsidianPlatformLive } from "./effects/ObsidianPlatform";
 import { MERGE_FORMAT } from "./sync/adfMarkdown";
+import { createAttachmentDownloader } from "./sync/attachmentDownload";
 import { createConfluenceRemote, type ConfluenceRemote } from "./sync/confluenceRemote";
+import { MediaSync, type MediaRemote } from "./sync/media";
+import { desktopFetch } from "./desktopFetch";
 import { createObsidianPullVault, linkedPageId } from "./sync/obsidianVault";
 import { createPageLinkResolver } from "./sync/pageLinks";
 import { PullService, convertPage } from "./sync/pull";
@@ -252,7 +256,7 @@ export default class ConfluencePlugin extends Plugin {
 		return withSiteUrlFallback(withResolvedSecrets(this.settings, this.app.secretStorage));
 	}
 
-	async authenticationClient() {
+	async authenticationClient(fetch?: ConfluenceFetch) {
 		const settings = this.resolvedSettings();
 		const browser = settings.confluenceAuthType === "oauth2" && settings.oauthMode === "browser";
 		if (browser) {
@@ -266,6 +270,7 @@ export default class ConfluencePlugin extends Plugin {
 		return createObsidianConfluenceClient(
 			settings,
 			browser ? await this.browserOAuth.accessToken() : undefined,
+			fetch,
 		);
 	}
 
@@ -377,12 +382,12 @@ export default class ConfluencePlugin extends Plugin {
 		await this.runExclusive(async (signal) => {
 			try {
 				const settings = this.resolvedSettings();
-				const client = await this.authenticationClient();
-				const service = new PullService(
-					createConfluenceRemote(client),
-					createObsidianPullVault(this.app),
-					this.syncState,
-				);
+				const downloader = createAttachmentDownloader(desktopFetch);
+				const client = await this.authenticationClient(downloader.fetch);
+				const remote = createConfluenceRemote(client, downloader.download);
+				const vault = createObsidianPullVault(this.app);
+				const media = new MediaSync(remote, vault, this.syncState, settings.imageFolder);
+				const service = new PullService(remote, vault, this.syncState, media);
 				const importNew = settings.importNewPages && !pageIds && settings.confluenceParentId;
 				const report = await service.pull({
 					confluenceBaseUrl: settings.confluenceBaseUrl,
@@ -490,6 +495,13 @@ export default class ConfluencePlugin extends Plugin {
 		const settings = this.resolvedSettings();
 		const vault = createObsidianPullVault(this.app);
 		const resolve = createPageLinkResolver(vault.linkedNotes(), vault.notePaths());
+		// Publishing doesn't download: images uploaded from this vault are matched by name.
+		const media = new MediaSync(
+			remote as ConfluenceRemote & MediaRemote,
+			vault,
+			this.syncState,
+			settings.imageFolder,
+		);
 		for (const upload of uploads) {
 			const { pageId, absoluteFilePath } = upload.adfFile;
 			if (!pageId) continue;
@@ -498,7 +510,8 @@ export default class ConfluencePlugin extends Plugin {
 				if (upload.contentResult === "same" && existing?.format === MERGE_FORMAT) continue;
 				const page = await remote.getPage(pageId);
 				if (!page) continue;
-				const converted = convertPage(page.adf, settings, resolve);
+				await media.ensure(page.adf, { download: false });
+				const converted = convertPage(page.adf, settings, resolve, media.resolver());
 				await this.syncState.set({
 					pageId,
 					version: page.version,
@@ -506,6 +519,7 @@ export default class ConfluencePlugin extends Plugin {
 					markdown: converted.markdown,
 					format: MERGE_FORMAT,
 					unresolvedLinks: converted.unresolvedLinks,
+					unresolvedMedia: converted.unresolvedMedia,
 				});
 			} catch (error) {
 				errors.push({

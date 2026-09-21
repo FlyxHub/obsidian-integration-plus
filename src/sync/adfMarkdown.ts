@@ -4,6 +4,7 @@ import {
 	readAdfDocument,
 } from "@markdown-confluence/lib";
 import { normalizeCalloutsForPublish } from "../callouts";
+import type { MediaResolver } from "./media";
 
 type AdfNode = { type: string; attrs?: Record<string, unknown>; content?: unknown[] };
 
@@ -28,10 +29,22 @@ const PRESENTATION_ATTRS: Record<string, (value: unknown) => boolean> = {
  * `localId`. Otherwise it is kept as an `adf` fence, which the publisher restores exactly,
  * so Confluence-only content such as statuses and attachments survives a round trip.
  */
-export function adfToMergeMarkdown(input: unknown, confluenceBaseUrl: string): string {
+export function adfToMergeMarkdown(
+	input: unknown,
+	confluenceBaseUrl: string,
+	media: MediaResolver = () => undefined,
+): string {
 	const document = readAdfDocument(input) as { content?: unknown[] };
-	const blocks = (document.content ?? []).filter(isNode);
-	return blocks.map((block) => blockToMarkdown(block, confluenceBaseUrl)).join("\n\n") + "\n";
+	return joinBlocks(document.content ?? [], confluenceBaseUrl, media) + "\n";
+}
+
+/** Convert blocks and separate them with blank lines, leaving out empty ones. */
+function joinBlocks(content: unknown[], confluenceBaseUrl: string, media: MediaResolver): string {
+	return content
+		.filter(isNode)
+		.map((block) => blockToMarkdown(block, confluenceBaseUrl, media))
+		.filter((markdown) => markdown !== "")
+		.join("\n\n");
 }
 
 /**
@@ -39,8 +52,9 @@ export function adfToMergeMarkdown(input: unknown, confluenceBaseUrl: string): s
  * changes: snapshots from an older version are converted again on the next pull, and the
  * difference is merged into notes as a formatting update.
  * 1: initial. 2: panels as callouts. 3: links to pages with notes as wikilinks.
+ * 4: images as embeds of downloaded files; empty paragraphs left out.
  */
-export const MERGE_FORMAT = 3;
+export const MERGE_FORMAT = 4;
 
 /** Confluence panel types and the Obsidian callout type that publishes back to each. */
 const PANEL_CALLOUTS: Record<string, string> = {
@@ -51,9 +65,13 @@ const PANEL_CALLOUTS: Record<string, string> = {
 	error: "failure",
 };
 
-function blockToMarkdown(block: AdfNode, confluenceBaseUrl: string): string {
+function blockToMarkdown(block: AdfNode, confluenceBaseUrl: string, media: MediaResolver): string {
+	// Confluence adds empty paragraphs, often at the end of a page; they carry no content.
+	if (block.type === "paragraph" && (block.content ?? []).length === 0) return "";
+	const embeds = mediaEmbeds(block, media);
+	if (embeds) return embeds;
 	if (block.type === "panel") {
-		const callout = panelToCallout(block, confluenceBaseUrl);
+		const callout = panelToCallout(block, confluenceBaseUrl, media);
 		if (callout && publishesAs(callout, block, confluenceBaseUrl)) return callout;
 	}
 	const readable = convertADFToMarkdown(asDocument(block), { lossless: false }).trim();
@@ -71,19 +89,39 @@ function blockToMarkdown(block: AdfNode, confluenceBaseUrl: string): string {
  * the panel's blocks together, so each block is converted here and separated by a quoted
  * blank line. Custom panels, with their own icon and color, have no callout equivalent.
  */
-function panelToCallout(panel: AdfNode, confluenceBaseUrl: string): string | undefined {
+function panelToCallout(
+	panel: AdfNode,
+	confluenceBaseUrl: string,
+	media: MediaResolver,
+): string | undefined {
 	const { panelType, ...otherAttrs } = stripPresentation({ attrs: panel.attrs }).attrs ?? {};
 	const calloutType = PANEL_CALLOUTS[String(panelType)];
 	if (!calloutType || Object.keys(otherAttrs).length > 0) return undefined;
-	const blocks = (panel.content ?? []).filter(isNode);
-	if (blocks.length === 0) return undefined;
-	const body = blocks
-		.map((block) => blockToMarkdown(block, confluenceBaseUrl))
-		.join("\n\n")
+	const inner = joinBlocks(panel.content ?? [], confluenceBaseUrl, media);
+	if (inner === "") return undefined;
+	const body = inner
 		.split("\n")
 		.map((line) => (line ? `> ${line}` : ">"))
 		.join("\n");
 	return `> [!${calloutType}]\n${body}`;
+}
+
+/**
+ * Images and files as Obsidian embeds of their downloaded copies. Publishing uploads the
+ * local file again, so these blocks skip the round-trip check: the media ID changes, but the
+ * page shows the same image. Returns undefined unless every file in the block has a copy.
+ */
+function mediaEmbeds(block: AdfNode, media: MediaResolver): string | undefined {
+	if (block.type !== "mediaSingle" && block.type !== "mediaGroup") return undefined;
+	const items = (block.content ?? []).filter(isNode);
+	if (items.length === 0 || items.some((item) => item.type !== "media")) return undefined;
+	const embeds = items.map((item) => {
+		const fileId = item.attrs?.["id"];
+		const target =
+			item.attrs?.["type"] === "file" && typeof fileId === "string" ? media(fileId) : undefined;
+		return target ? `![[${target}]]` : undefined;
+	});
+	return embeds.every((embed) => embed !== undefined) ? embeds.join("\n") : undefined;
 }
 
 /** True when publishing the Markdown recreates the block, ignoring editor-only attributes. */

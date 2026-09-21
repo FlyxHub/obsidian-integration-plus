@@ -10,6 +10,7 @@ import {
 	toNoteName,
 	type PullVault,
 } from "./pull";
+import { MediaSync, safeFileName } from "./media";
 import type { SyncBase, SyncStateStore } from "./syncState";
 
 const BASE_URL = "https://example.atlassian.net";
@@ -58,11 +59,14 @@ function page(id: string, markdown: string, version: number, extra: Partial<Remo
 
 function fakeState(initial: SyncBase[] = []) {
 	const bases = new Map(initial.map((base) => [base.pageId, base]));
+	const media: Record<string, string> = {};
 	const store: SyncStateStore = {
 		get: async (id) => bases.get(id),
 		set: async (base) => void bases.set(base.pageId, base),
+		getMedia: async () => ({ ...media }),
+		setMedia: async (map) => void Object.assign(media, map),
 	};
-	return { store, bases };
+	return { store, bases, media };
 }
 
 function fakeVault(files: Record<string, string>) {
@@ -99,6 +103,7 @@ const base = (id: string, markdown: string, version: number): SyncBase => ({
 	markdown: adfToMergeMarkdown(adf(markdown), BASE_URL),
 	format: MERGE_FORMAT,
 	unresolvedLinks: [],
+	unresolvedMedia: [],
 });
 
 test("pull merges a Confluence edit into the note and keeps frontmatter and local-only syntax", async () => {
@@ -308,7 +313,15 @@ test("pull reformats notes whose snapshot came from an older converter, without 
 	const note = `---\nconnie-page-id: "1"\n---\nIntro.\n\n${oldFence}`;
 	const { vault, files } = fakeVault({ "A.md": note });
 	const { store, bases } = fakeState([
-		{ pageId: "1", version: 3, title: "Page 1", markdown: `Intro.\n\n${oldFence}`, format: 1, unresolvedLinks: [] },
+		{
+			pageId: "1",
+			version: 3,
+			title: "Page 1",
+			markdown: `Intro.\n\n${oldFence}`,
+			format: 1,
+			unresolvedLinks: [],
+			unresolvedMedia: [],
+		},
 	]);
 	const remote = fakeRemote([page("1", "Intro.\n\n> [!warning] Careful.\n", 3)]);
 	const report = await new PullService(remote, vault, store).pull(OPTIONS);
@@ -364,4 +377,110 @@ test("a note is converted again once a page it links to gets a note", async () =
 	expect(report.updated).toEqual(["A.md"]);
 	expect(files["A.md"]).toBe('---\nconnie-page-id: "1"\n---\nSee [[Later]].\n');
 	expect(bases.get("1")?.unresolvedLinks).toEqual([]);
+});
+
+test("imports images as embeds of downloaded files in the image folder", async () => {
+	const imageBlock = {
+		type: "mediaSingle",
+		attrs: { widthType: "pixel" },
+		content: [
+			{
+				type: "media",
+				attrs: {
+					alt: "shot.png",
+					collection: "contentId-30",
+					height: 810,
+					id: "file-1",
+					type: "file",
+				},
+			},
+		],
+	};
+	const pageAdf = {
+		type: "doc",
+		version: 1,
+		content: [
+			{ type: "paragraph", content: [{ type: "text", text: "Images test." }] },
+			imageBlock,
+			{ type: "paragraph" },
+		],
+	};
+	const { vault, files } = fakeVault({});
+	const binaries: Record<string, Uint8Array> = {};
+	const mediaVault = {
+		filePaths: () => [...Object.keys(files), ...Object.keys(binaries)],
+		exists: (path: string) => path in files || path in binaries,
+		writeBinary: async (path: string, data: Uint8Array) => void (binaries[path] = data),
+	};
+	const remote = fakeRemote([{ ...page("30", "", 1, { title: "With image" }), adf: pageAdf }], {
+		root: [{ id: "30", title: "With image" }],
+	});
+	const downloads: string[] = [];
+	const mediaRemote = {
+		listAttachments: async () => [
+			{ id: "att1", title: "08-52-33 09-16-2026.png", fileId: "file-1" },
+		],
+		downloadAttachment: async (pageId: string, attachmentId: string) => {
+			downloads.push(`${pageId}/${attachmentId}`);
+			return new Uint8Array([1, 2, 3]);
+		},
+	};
+	const { store, media } = fakeState();
+	const sync = new MediaSync(mediaRemote, mediaVault, store, "images");
+	const report = await new PullService(remote, vault, store, sync).pull({
+		...OPTIONS,
+		importUnder: { rootPageId: "root", rootFolder: "Docs" },
+	});
+
+	expect(report.imported).toEqual(["Docs/With image.md"]);
+	expect(files["Docs/With image.md"]).toBe("Images test.\n\n![[08-52-33 09-16-2026.png]]\n");
+	expect(binaries["images/08-52-33 09-16-2026.png"]).toEqual(new Uint8Array([1, 2, 3]));
+	expect(media).toEqual({ "file-1": "images/08-52-33 09-16-2026.png" });
+	expect(downloads).toEqual(["30/att1"]);
+});
+
+test("reuses downloaded and published images instead of downloading again", async () => {
+	const files: Record<string, string> = {
+		"images/diagram.png": "",
+		"Docs/local.png": "",
+	};
+	const vault = {
+		filePaths: () => Object.keys(files),
+		exists: (path: string) => path in files,
+		writeBinary: async () => {
+			throw new Error("should not download");
+		},
+	};
+	const mediaRemote = {
+		listAttachments: async () => [
+			{ id: "a2", title: "0123456789abcdef0123456789abcdef-local.png", fileId: "published" },
+		],
+		downloadAttachment: async () => {
+			throw new Error("should not download");
+		},
+	};
+	const { store } = fakeState();
+	await store.setMedia({ known: "images/diagram.png" });
+	const sync = new MediaSync(mediaRemote, vault, store, "images");
+	const adfWith = (...ids: string[]) => ({
+		type: "doc",
+		content: ids.map((id) => ({
+			type: "mediaSingle",
+			content: [{ type: "media", attrs: { id, type: "file", collection: "contentId-5" } }],
+		})),
+	});
+	expect(await sync.ensure(adfWith("known", "published"), { download: false })).toEqual([]);
+	const resolve = sync.resolver();
+	expect(resolve("known")).toBe("diagram.png");
+	expect(resolve("published")).toBe("local.png");
+});
+
+test("names downloaded files safely and without overwriting", () => {
+	expect(safeFileName("../../evil.png", "1")).toEqual({ name: "-..-evil", extension: ".png" });
+	expect(safeFileName("report.final.PDF", "1")).toEqual({
+		name: "report.final",
+		extension: ".pdf",
+	});
+	expect(safeFileName("no extension", "1")).toEqual({ name: "no extension", extension: "" });
+	expect(safeFileName("weird.ex$e", "1")).toEqual({ name: "weird.ex$e", extension: "" });
 });

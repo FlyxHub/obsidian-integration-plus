@@ -24,7 +24,7 @@ The plugin runs on desktop only and requires Obsidian 1.11.4 or later.
 Obsidian's developer policies require plugins to disclose the following behavior:
 
 - **Account:** You need an Atlassian Cloud account with access to a Confluence site.
-- **Network use:** The plugin sends note content, attachments, labels, and page metadata over HTTPS to the Confluence site that you configure. When you pull, it reads pages from that site and writes their content into your notes. It contacts `auth.atlassian.com` and `api.atlassian.com` only to sign in with OAuth and to refresh tokens. If you turn on Kroki or PlantUML rendering, the plugin sends diagram source to the server that you configure. The plugin doesn't collect telemetry.
+- **Network use:** The plugin sends note content, attachments, labels, and page metadata over HTTPS to the Confluence site that you configure. When you pull, it reads pages from that site and writes their content into your notes, and downloads page images and other attachments from Atlassian's media service (`*.atlassian.com`) into your vault. Confluence credentials are never sent to the media service. It contacts `auth.atlassian.com` and `api.atlassian.com` only to sign in with OAuth and to refresh tokens. If you turn on Kroki or PlantUML rendering, the plugin sends diagram source to the server that you configure. The plugin doesn't collect telemetry.
 - **Local network listener:** Browser OAuth sign-in starts a temporary HTTP listener on `127.0.0.1` at the callback port that you configure. The listener accepts one matching sign-in response, and then stops. It also stops when you cancel sign-in or after five minutes.
 - **Files other than notes:** To match your Obsidian theme in Mermaid diagrams, the plugin reads the active theme and enabled CSS snippets from the vault's configuration folder. To support pulling, it saves a snapshot of each published page in a `sync` folder inside the plugin's folder. The first time it loads, if it has no settings yet, it reads the settings of the original Confluence Integration plugin, if that plugin is installed. The plugin doesn't read or write files outside the vault.
 - **Credentials:** The plugin keeps API tokens, client secrets, and OAuth tokens in Obsidian secret storage, not in the plugin's `data.json` file. The original Confluence Integration plugin stored the API token and the service-account client secret in `data.json`. If this plugin finds those values, it moves them into secret storage and removes them from `data.json`.
@@ -116,6 +116,8 @@ If a page's title changed in Confluence, the plugin sets the note's `connie-titl
 
 If a page was deleted in Confluence, the plugin reports it and keeps your note.
 
+Images and other attachments are downloaded into the **Image folder** (by default, `images` at the root of your vault), and notes embed them, such as `![[diagram.png]]`. Each attachment is downloaded once; later pulls reuse the file. If a file with the same name already exists, the plugin adds a number to the new file's name. When you publish, the image is uploaded to the page again.
+
 Links to other Confluence pages become Obsidian wikilinks when the linked page has a note, such as `[[Local Admin Access]]` or `[[Local Admin Access|the admin page]]`. A link to a section becomes a heading link, such as `[[Local Admin Access#Steps to follow]]`. Links to pages that don't have a note yet stay web links; after a later pull imports those pages, the next pull turns the links into wikilinks. When you publish, wikilinks become links to the Confluence pages again.
 
 ### Resolve conflicts
@@ -166,7 +168,9 @@ The plugin skips a page, and says why in the results dialog, in these cases:
 
 ### Limitations
 
-- Pull doesn't download attachments. Images and other attachments stay in Confluence, and the note refers to them in an `adf` code block, which is restored exactly when you publish.
+- An image whose attachment can't be found or downloaded stays an `adf` code block, and the results dialog says why. Images inside tables and other blocks that Markdown can't represent also stay in `adf` code blocks.
+- Publishing a pulled image uploads your local copy as a new attachment, so the page keeps the original attachment as well.
+- Attachments larger than 100 MB aren't downloaded.
 - Content that Markdown can't represent, such as status lozenges, page layouts, and custom panels with their own icon or color, appears as an `adf` code block. Edit these blocks in Confluence.
 - For security, pulled code blocks that plugins run as JavaScript, such as `dataviewjs` and `js-engine`, become plain `text` code blocks, and Dataview inline JavaScript (`` `$= ...` ``) is disabled. This prevents anyone who can edit a Confluence page from running code in your vault. Code blocks that you wrote in Obsidian aren't changed.
 - Short share links, such as `https://example.atlassian.net/wiki/x/AbCd`, don't contain a page ID, so they stay web links.

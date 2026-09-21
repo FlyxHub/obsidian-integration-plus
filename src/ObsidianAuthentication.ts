@@ -1,6 +1,7 @@
 import {
 	createAuthenticatedConfluenceClient,
 	validateConfluenceSettings,
+	type ConfluenceFetch,
 	type ConfluenceUploadSettings,
 } from "@markdown-confluence/lib";
 import { Effect } from "effect";
@@ -11,6 +12,7 @@ import { describeSettingsIssue } from "./settings";
 export async function createObsidianConfluenceClient(
 	settings: ConfluenceUploadSettings.ConfluenceSettings,
 	oauthAccessToken?: string,
+	fetch: ConfluenceFetch = desktopFetch,
 ) {
 	const validation = validateConfluenceSettings(
 		oauthAccessToken
@@ -20,7 +22,7 @@ export async function createObsidianConfluenceClient(
 	if (!validation.valid) throw new Error(validation.issues.map(describeSettingsIssue).join("\n"));
 	return Effect.runPromise(
 		createAuthenticatedConfluenceClient(settings, {
-			fetch: desktopFetch,
+			fetch,
 			...(oauthAccessToken ? { oauthAccessToken } : {}),
 		}),
 	);
