@@ -7,6 +7,8 @@ export interface SyncBase {
 	title: string;
 	/** The page body converted with `adfToMergeMarkdown`. */
 	markdown: string;
+	/** The `MERGE_FORMAT` that produced `markdown`; 1 for snapshots saved before it existed. */
+	format: number;
 }
 
 export interface SyncStateStore {
@@ -46,8 +48,8 @@ export function createSyncStateStore(adapter: DataAdapter, directory: string): S
 
 function parseBase(value: unknown, pageId: string): SyncBase | undefined {
 	if (!value || typeof value !== "object") return undefined;
-	const { version, title, markdown } = value as Record<string, unknown>;
+	const { version, title, markdown, format } = value as Record<string, unknown>;
 	if (typeof version !== "number" || typeof title !== "string" || typeof markdown !== "string")
 		return undefined;
-	return { pageId, version, title, markdown };
+	return { pageId, version, title, markdown, format: typeof format === "number" ? format : 1 };
 }

@@ -1,4 +1,4 @@
-import { adfToMergeMarkdown } from "./adfMarkdown";
+import { MERGE_FORMAT, adfToMergeMarkdown } from "./adfMarkdown";
 import type { ConfluenceRemote, RemoteChild, RemotePage } from "./confluenceRemote";
 import { hasConflictMarkers, mergeThreeWay, mergeTwoWay, splitFrontmatter } from "./merge";
 import type { SyncStateStore } from "./syncState";
@@ -95,7 +95,10 @@ export class PullService {
 			return;
 		}
 		const base = await this.state.get(pageId);
-		if (base && remoteVersion === base.version) {
+		// A snapshot in an older format is converted again even if the page didn't change, so
+		// formatting improvements reach notes that were already pulled.
+		const current = base?.format === MERGE_FORMAT;
+		if (base && current && remoteVersion === base.version) {
 			report.unchanged++;
 			return;
 		}
@@ -104,7 +107,7 @@ export class PullService {
 			report.deleted.push(path);
 			return;
 		}
-		if (base && page.version === base.version) {
+		if (base && current && page.version === base.version) {
 			report.unchanged++;
 			return;
 		}
@@ -211,7 +214,13 @@ export class PullService {
 	}
 
 	private async recordBase(page: RemotePage, markdown: string) {
-		await this.state.set({ pageId: page.id, version: page.version, title: page.title, markdown });
+		await this.state.set({
+			pageId: page.id,
+			version: page.version,
+			title: page.title,
+			markdown,
+			format: MERGE_FORMAT,
+		});
 	}
 
 	private async currentAccountId() {

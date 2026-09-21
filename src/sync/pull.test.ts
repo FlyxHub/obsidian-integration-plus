@@ -1,6 +1,6 @@
 import { expect, test } from "@effect/vitest";
 import { parseMarkdownToADF } from "@markdown-confluence/lib";
-import { adfToMergeMarkdown } from "./adfMarkdown";
+import { MERGE_FORMAT, adfToMergeMarkdown } from "./adfMarkdown";
 import type { ConfluenceRemote, RemoteChild, RemotePage } from "./confluenceRemote";
 import { HAS_CONFLICTS, NEEDS_PULL, checkBeforePublish } from "./publishGate";
 import {
@@ -95,6 +95,7 @@ const base = (id: string, markdown: string, version: number): SyncBase => ({
 	version,
 	title: `Page ${id}`,
 	markdown: adfToMergeMarkdown(adf(markdown), BASE_URL),
+	format: MERGE_FORMAT,
 });
 
 test("pull merges a Confluence edit into the note and keeps frontmatter and local-only syntax", async () => {
@@ -297,4 +298,18 @@ test("publish check blocks unpulled changes and conflict markers, and marks up-t
 		{ fileName: "Two.md", reason: NEEDS_PULL },
 	]);
 	expect([...check.upToDate]).toEqual(["One.md"]);
+});
+
+test("pull reformats notes whose snapshot came from an older converter, without a page change", async () => {
+	const oldFence = '```adf\n{"type":"panel","attrs":{"panelType":"warning"}}\n```\n';
+	const note = `---\nconnie-page-id: "1"\n---\nIntro.\n\n${oldFence}`;
+	const { vault, files } = fakeVault({ "A.md": note });
+	const { store, bases } = fakeState([
+		{ pageId: "1", version: 3, title: "Page 1", markdown: `Intro.\n\n${oldFence}`, format: 1 },
+	]);
+	const remote = fakeRemote([page("1", "Intro.\n\n> [!warning] Careful.\n", 3)]);
+	const report = await new PullService(remote, vault, store).pull({ confluenceBaseUrl: BASE_URL });
+	expect(report.updated).toEqual(["A.md"]);
+	expect(files["A.md"]).toBe('---\nconnie-page-id: "1"\n---\nIntro.\n\n> [!warning]\n> Careful.\n');
+	expect(bases.get("1")?.format).toBe(MERGE_FORMAT);
 });

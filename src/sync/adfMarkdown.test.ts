@@ -1,5 +1,6 @@
 import { expect, test } from "@effect/vitest";
 import { parseMarkdownToADF } from "@markdown-confluence/lib";
+import { normalizeCalloutsForPublish } from "../callouts";
 import { adfToMergeMarkdown, neutralizeExecutableMarkdown, sameContent } from "./adfMarkdown";
 
 const BASE_URL = "https://example.atlassian.net";
@@ -86,4 +87,48 @@ test("neutralizes executable fences regardless of case, fence style or indentati
 	expect(neutralizeExecutableMarkdown("~~~~ DataviewJS\nx\n~~~~")).toBe("~~~~text\nx\n~~~~");
 	expect(neutralizeExecutableMarkdown("  ```js-engine\nx\n  ```")).toBe("  ```text\nx\n  ```");
 	expect(neutralizeExecutableMarkdown("```dataview\nLIST\n```")).toBe("```dataview\nLIST\n```");
+});
+
+test("pulls Confluence panels as Obsidian callouts", () => {
+	const panel = (panelType: string, ...content: unknown[]) => ({
+		type: "panel",
+		attrs: { panelType, localId: "x" },
+		content,
+	});
+	const markdown = adfToMergeMarkdown(
+		doc(
+			panel("warning", paragraph("Careful.", { localId: "p" })),
+			panel("info", paragraph("First."), paragraph("Second."), {
+				type: "bulletList",
+				content: [{ type: "listItem", content: [paragraph("item")] }],
+			}),
+			panel("error", paragraph("Broken.")),
+		),
+		BASE_URL,
+	);
+	expect(markdown).toBe(
+		"> [!warning]\n> Careful.\n\n> [!info]\n> First.\n>\n> Second.\n>\n> - item\n\n> [!failure]\n> Broken.\n",
+	);
+});
+
+test("keeps custom panels, which have no callout equivalent, as adf fences", () => {
+	const custom = {
+		type: "panel",
+		attrs: { panelType: "custom", panelIcon: ":smile:", panelColor: "#abcdef" },
+		content: [paragraph("Custom.")],
+	};
+	expect(adfToMergeMarkdown(doc(custom), BASE_URL).startsWith("```adf")).toBe(true);
+});
+
+test("an untitled Obsidian callout publishes as a panel and pulls back unchanged", () => {
+	const source = "> [!note]\n> Remember this.\n>\n> And this.\n";
+	const published = parseMarkdownToADF(normalizeCalloutsForPublish(source), BASE_URL);
+	expect(published.content).toEqual([
+		{
+			type: "panel",
+			attrs: { panelType: "note" },
+			content: [paragraph("Remember this."), paragraph("And this.")],
+		},
+	]);
+	expect(adfToMergeMarkdown(published, BASE_URL)).toBe(source);
 });

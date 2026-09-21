@@ -165,13 +165,14 @@ The plugin skips a page, and says why in the results dialog, in these cases:
 ### Limitations
 
 - Pull doesn't download attachments. Images and other attachments stay in Confluence, and the note refers to them in an `adf` code block, which is restored exactly when you publish.
-- Content that Markdown can't represent, such as status lozenges and page layouts, appears as an `adf` code block. Edit these blocks in Confluence.
+- Content that Markdown can't represent, such as status lozenges, page layouts, and custom panels with their own icon or color, appears as an `adf` code block. Edit these blocks in Confluence.
 - For security, pulled code blocks that plugins run as JavaScript, such as `dataviewjs` and `js-engine`, become plain `text` code blocks, and Dataview inline JavaScript (`` `$= ...` ``) is disabled. This prevents anyone who can edit a Confluence page from running code in your vault. Code blocks that you wrote in Obsidian aren't changed.
 - Pull applies changes line by line. If you and someone in Confluence edit the same paragraph, the whole paragraph is a conflict.
 
 ## Diagrams, equations, and embeds
 
 - **Embeds:** The plugin expands note embeds, such as `![[Shared Notes/Release Checklist]]`, before publishing.
+- **Callouts and panels:** Callouts publish as Confluence panels, and pulled panels become callouts. Info, note, warning, and success panels match the callout of the same name, and error panels match `[!failure]`. A callout without a title publishes only its text, because the panel's icon shows its type. A callout with a title publishes the title as the panel's first line. Other callout types publish as info panels or custom panels.
 - **Mermaid and LaTeX:** The plugin renders Mermaid diagrams and LaTeX equations on your computer.
 - **Kroki and PlantUML:** Kroki (`kroki-*` code blocks) and PlantUML (`plantuml`, `puml`, and `uml` code blocks) are off by default. When you turn them on, the plugin sends diagram source to the server that you configure. Use a server that you trust, such as a self-hosted instance.
 - **Dataview:** If Dataview is installed and **Publish Dataview results** is on, the plugin publishes the results of Dataview `TABLE`, `LIST`, and `TASK` queries. DataviewJS and inline queries aren't supported.

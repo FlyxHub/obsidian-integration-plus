@@ -3,6 +3,7 @@ import {
 	parseMarkdownToADF,
 	readAdfDocument,
 } from "@markdown-confluence/lib";
+import { normalizeCalloutsForPublish } from "../callouts";
 
 type AdfNode = { type: string; attrs?: Record<string, unknown>; content?: unknown[] };
 
@@ -33,15 +34,62 @@ export function adfToMergeMarkdown(input: unknown, confluenceBaseUrl: string): s
 	return blocks.map((block) => blockToMarkdown(block, confluenceBaseUrl)).join("\n\n") + "\n";
 }
 
+/**
+ * Version of `adfToMergeMarkdown`'s output. Bump it whenever the output for the same ADF
+ * changes: snapshots from an older version are converted again on the next pull, and the
+ * difference is merged into notes as a formatting update.
+ * 1: initial. 2: panels as callouts.
+ */
+export const MERGE_FORMAT = 2;
+
+/** Confluence panel types and the Obsidian callout type that publishes back to each. */
+const PANEL_CALLOUTS: Record<string, string> = {
+	info: "info",
+	note: "note",
+	warning: "warning",
+	success: "success",
+	error: "failure",
+};
+
 function blockToMarkdown(block: AdfNode, confluenceBaseUrl: string): string {
+	if (block.type === "panel") {
+		const callout = panelToCallout(block, confluenceBaseUrl);
+		if (callout && publishesAs(callout, block, confluenceBaseUrl)) return callout;
+	}
 	const readable = convertADFToMarkdown(asDocument(block), { lossless: false }).trim();
 	if (readable && !readable.startsWith("```adf")) {
-		const reparsed = parseMarkdownToADF(readable, confluenceBaseUrl).content ?? [];
-		if (sameContent(reparsed, [block])) return neutralizeExecutableMarkdown(readable);
+		if (publishesAs(readable, block, confluenceBaseUrl))
+			return neutralizeExecutableMarkdown(readable);
 	}
 	return neutralizeExecutableMarkdown(
 		convertADFToMarkdown(asDocument(stripPresentation(block)), { lossless: true }).trim(),
 	);
+}
+
+/**
+ * A Confluence panel as an Obsidian callout without a title. The lib's own conversion runs
+ * the panel's blocks together, so each block is converted here and separated by a quoted
+ * blank line. Custom panels, with their own icon and color, have no callout equivalent.
+ */
+function panelToCallout(panel: AdfNode, confluenceBaseUrl: string): string | undefined {
+	const { panelType, ...otherAttrs } = stripPresentation({ attrs: panel.attrs }).attrs ?? {};
+	const calloutType = PANEL_CALLOUTS[String(panelType)];
+	if (!calloutType || Object.keys(otherAttrs).length > 0) return undefined;
+	const blocks = (panel.content ?? []).filter(isNode);
+	if (blocks.length === 0) return undefined;
+	const body = blocks
+		.map((block) => blockToMarkdown(block, confluenceBaseUrl))
+		.join("\n\n")
+		.split("\n")
+		.map((line) => (line ? `> ${line}` : ">"))
+		.join("\n");
+	return `> [!${calloutType}]\n${body}`;
+}
+
+/** True when publishing the Markdown recreates the block, ignoring editor-only attributes. */
+function publishesAs(markdown: string, block: AdfNode, confluenceBaseUrl: string): boolean {
+	const published = parseMarkdownToADF(normalizeCalloutsForPublish(markdown), confluenceBaseUrl);
+	return sameContent(published.content ?? [], [block]);
 }
 
 /**

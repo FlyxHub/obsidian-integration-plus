@@ -12,6 +12,7 @@ First release as Confluence Integration Plus, forked from Confluence Integration
 - Import pages that were added under the parent page in Confluence as new notes and folders.
 - Stop a publish when Confluence has changes that you haven't pulled, or when a note still has conflict markers.
 - Import settings from the original Confluence Integration plugin the first time the plugin loads.
+- Pull Confluence info, note, warning, success, and error panels as Obsidian callouts. Notes that were already pulled are reformatted on the next pull.
 
 ### Security
 
@@ -20,6 +21,8 @@ First release as Confluence Integration Plus, forked from Confluence Integration
 - Only link to `https:` page URLs in the results dialog.
 
 ### Changes
+
+- A callout without a title no longer adds its type, such as "Warning", as the first line of the Confluence panel.
 
 - Requires Obsidian 1.11.4 or later.
 - Plugin ID is `confluence-integration-plus`, so it installs alongside the original plugin instead of replacing it.

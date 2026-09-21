@@ -15,6 +15,7 @@ import {
 	HttpKrokiRenderer,
 	KrokiRendererPlugin,
 	MarkdownConfluencePlatform,
+	type MarkdownSourceTransformer,
 	MarkdownSourceTransformerService,
 	MarkdownWorkspaceLive,
 	MarkdownWorkspaceService,
@@ -32,6 +33,7 @@ import {
 import { HttpPlantumlRenderer } from "@markdown-confluence/plantuml-renderer";
 import type { MermaidConfig } from "mermaid";
 import { BrowserOAuth } from "./BrowserOAuth";
+import { normalizeCalloutsForPublish } from "./callouts";
 import { CompletedModal, type UploadResults } from "./CompletedModal";
 import {
 	ConfluencePerPageForm,
@@ -42,7 +44,7 @@ import { createDataviewTransformer } from "./DataviewTransformer";
 import { krokiFetch } from "./KrokiFetch";
 import { createObsidianConfluenceClient } from "./ObsidianAuthentication";
 import { ObsidianPlatformLive } from "./effects/ObsidianPlatform";
-import { adfToMergeMarkdown } from "./sync/adfMarkdown";
+import { MERGE_FORMAT, adfToMergeMarkdown } from "./sync/adfMarkdown";
 import { createConfluenceRemote, type ConfluenceRemote } from "./sync/confluenceRemote";
 import { createObsidianPullVault, linkedPageId } from "./sync/obsidianVault";
 import { PullService } from "./sync/pull";
@@ -487,7 +489,8 @@ export default class ConfluencePlugin extends Plugin {
 			const { pageId, absoluteFilePath } = upload.adfFile;
 			if (!pageId) continue;
 			try {
-				if (upload.contentResult === "same" && (await this.syncState.get(pageId))) continue;
+				const existing = await this.syncState.get(pageId);
+				if (upload.contentResult === "same" && existing?.format === MERGE_FORMAT) continue;
 				const page = await remote.getPage(pageId);
 				if (!page) continue;
 				await this.syncState.set({
@@ -495,6 +498,7 @@ export default class ConfluencePlugin extends Plugin {
 					version: page.version,
 					title: page.title,
 					markdown: adfToMergeMarkdown(page.adf, this.resolvedSettings().confluenceBaseUrl),
+					format: MERGE_FORMAT,
 				});
 			} catch (error) {
 				errors.push({
@@ -644,15 +648,21 @@ export default class ConfluencePlugin extends Plugin {
 		return Effect.runPromise(
 			effect.pipe(
 				Effect.provide(MarkdownWorkspaceLive),
-				Effect.provideService(
-					MarkdownSourceTransformerService,
-					createDataviewTransformer(this.app, this.settings),
-				),
+				Effect.provideService(MarkdownSourceTransformerService, this.sourceTransformer()),
 				Effect.provide(this.settingsLayer),
 				Effect.provide(this.platform),
 				Effect.mapError(toError),
 			),
 		);
+	}
+
+	/** Publish-time Markdown changes: Dataview results, then callouts shaped for panels. */
+	private sourceTransformer(): MarkdownSourceTransformer {
+		const dataview = createDataviewTransformer(this.app, this.settings);
+		return {
+			transform: (markdown, context) =>
+				dataview.transform(markdown, context).pipe(Effect.map(normalizeCalloutsForPublish)),
+		};
 	}
 
 	private showPublishResults(uploadResults: UploadResults) {
