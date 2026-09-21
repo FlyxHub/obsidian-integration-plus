@@ -23,7 +23,6 @@ First release as Confluence Integration Plus, forked from Confluence Integration
 ### Changes
 
 - A callout without a title no longer adds its type, such as "Warning", as the first line of the Confluence panel.
-
 - Requires Obsidian 1.11.4 or later.
 - Plugin ID is `confluence-integration-plus`, so it installs alongside the original plugin instead of replacing it.
 - Commands and settings use sentence case, and styles use Obsidian CSS variables.
