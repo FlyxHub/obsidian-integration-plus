@@ -22,3 +22,6 @@ data.json
 .DS_Store
 # test coverage
 coverage
+
+# pull snapshots: copies of Confluence page content, never commit
+sync/
