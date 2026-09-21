@@ -31,6 +31,13 @@ npm run fmt          # Prettier (tabs, width 100)
 
 After making changes, commit them and push to `origin` without waiting to be asked. Stage files by path, never with `git add -A` or `git add .`, and check `git status` before committing: this folder is a live plugin install, so it also holds runtime data (`data.json`, and `sync/` with copies of Confluence page content). Neither may ever be committed; the repository is public. Run `npm run typecheck`, `npm run lint` and `npm test` first, and say so if any fail. Work on a feature branch rather than `main`; push new branches with `git push -u origin <branch>`.
 
+## Versioning
+
+Keep version numbers current with every change. The version lives in `package.json`, `package-lock.json`, `manifest.json` and `versions.json`; `src/versions.test.ts` fails if they disagree, if `versions.json` lacks the current version with the current `minAppVersion`, or if `CHANGELOG.md` has no heading for it.
+- Record every user-visible change in `CHANGELOG.md` under the current version's heading. While that version is unreleased (heading says "(unreleased)"), keep adding to it.
+- Once a version has been released (its Git tag exists), the next change starts a new version: run `npm version patch|minor|major` (semver: patch for fixes, minor for features, major for breaking changes such as raising `minAppVersion` or changing settings or stored data), which updates all four files, and add a new "(unreleased)" heading to the changelog. `npm version` also commits and tags, so on a feature branch use `npm version <type> --no-git-tag-version` and tag only when releasing from `main`.
+- If `minAppVersion` changes, update `versions.json` for the current version too.
+
 ## Documentation
 
 Write user-facing docs, such as `README.md`, in the style of the [Google developer documentation style guide](https://developers.google.com/style): second person, present tense, active voice, sentence-case headings, serial commas, numbered steps for procedures, and `PLACEHOLDER` names that the text explains. The README includes the testing and release guides; update them when scripts, the release process, or anything in the Disclosures section changes.
