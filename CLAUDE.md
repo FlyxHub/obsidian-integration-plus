@@ -61,7 +61,7 @@ All new and changed code must follow these rules. They come from Obsidian's Plug
 - Pass every user-supplied or constructed vault path through `normalizePath()`. When comparing folder prefixes, compare against `folder + "/"` so that `Docs` doesn't match `Docs-archive`.
 - Check with `instanceof` (`TFile`, `TFolder`, `FileSystemAdapter`) before narrowing a type. Don't use `as any`.
 - Plugin data is stored only through `loadData()`/`saveData()`, and always via `toPersistedSettings`.
-- Never use browser `fetch` or axios for remote calls (CORS). Confluence and OAuth requests go through `desktopFetch` and Kroki through `krokiFetch`. Both use Node `https`, because they need abort signals, binary bodies and refusing redirects, which `requestUrl` doesn't provide. Keep those guarantees in any new transport, or use `requestUrl`.
+- Never use browser `fetch` or axios for remote calls (CORS). Confluence and OAuth requests go through `desktopFetch` and Kroki through `krokiFetch`. Both use Node `https`, because they need abort signals and must refuse redirects, which `requestUrl` doesn't support. Keep those guarantees in any new transport, or use `requestUrl`.
 - If you need `moment`, import it from `obsidian`.
 
 ### Secrets
