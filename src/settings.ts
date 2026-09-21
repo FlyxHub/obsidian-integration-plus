@@ -1,5 +1,9 @@
 import type { SecretStorage } from "obsidian";
-import { ConfluenceUploadSettings, DEFAULT_KROKI_SETTINGS } from "@markdown-confluence/lib";
+import {
+	ConfluenceUploadSettings,
+	DEFAULT_KROKI_SETTINGS,
+	type ConfluenceSettingsValidationIssue,
+} from "@markdown-confluence/lib";
 import type { BrowserOAuthSettings } from "./BrowserOAuth";
 
 export const MERMAID_THEMES = {
@@ -105,6 +109,40 @@ export function withResolvedSecrets(
 		atlassianApiToken: readSecret(storage, settings.apiTokenSecretName),
 		atlassianClientSecret: readSecret(storage, settings.clientSecretSecretName),
 	};
+}
+
+/**
+ * API tokens and bearer tokens use the site's own address as the API URL, so a blank
+ * Confluence API URL falls back to the site URL. OAuth always needs the API gateway URL.
+ */
+export function withSiteUrlFallback<T extends ConfluenceUploadSettings.ConfluenceSettings>(
+	settings: T,
+): T {
+	const siteUrl = settings.confluenceSiteUrl.trim();
+	if (settings.confluenceBaseUrl.trim() || !siteUrl || settings.confluenceAuthType === "oauth2")
+		return settings;
+	return { ...settings, confluenceBaseUrl: siteUrl };
+}
+
+/** Setting names as the settings tab shows them, for validation messages. */
+const SETTING_LABELS: Partial<Record<keyof ObsidianPluginSettings, string>> = {
+	confluenceBaseUrl: "Confluence API URL",
+	confluenceSiteUrl: "Confluence site URL",
+	confluenceParentId: "Parent page ID",
+	atlassianUserName: "Atlassian username",
+	atlassianApiToken: "Atlassian API token",
+	atlassianClientId: "OAuth client ID",
+	atlassianClientSecret: "OAuth client secret",
+	folderToPublish: "Folder to publish",
+};
+
+/** A validation issue from the lib, worded with the setting's name in the settings tab. */
+export function describeSettingsIssue(issue: ConfluenceSettingsValidationIssue): string {
+	const label = SETTING_LABELS[issue.field];
+	if (!label) return issue.message;
+	return / is required$/.test(issue.message)
+		? `${label} is required.`
+		: `${label}: ${issue.message}`;
 }
 
 /** The data written to data.json: credential values are always blank. */

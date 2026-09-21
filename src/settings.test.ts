@@ -1,10 +1,12 @@
 import { expect, test } from "@effect/vitest";
 import type { SecretStorage } from "obsidian";
 import {
+	describeSettingsIssue,
 	mergeSettings,
 	migrateSecretsToStorage,
 	toPersistedSettings,
 	withResolvedSecrets,
+	withSiteUrlFallback,
 } from "./settings";
 
 function fakeStorage(initial: Record<string, string> = {}) {
@@ -90,4 +92,37 @@ test("keeps nested defaults and rejects unknown Mermaid themes from older data",
 test("ignores malformed plugin data", () => {
 	expect(mergeSettings(null).mermaidTheme).toBe("match-obsidian");
 	expect(mergeSettings(["unexpected"]).showPublishResultsModal).toBe(true);
+});
+
+test("uses the site URL as the API URL when it's left empty for token authentication", () => {
+	const settings = mergeSettings({ confluenceSiteUrl: " https://example.atlassian.net " });
+	expect(withSiteUrlFallback(settings).confluenceBaseUrl).toBe("https://example.atlassian.net");
+	const explicit = mergeSettings({
+		confluenceSiteUrl: "https://example.atlassian.net",
+		confluenceBaseUrl: "https://api.atlassian.com/ex/confluence/abc",
+	});
+	expect(withSiteUrlFallback(explicit).confluenceBaseUrl).toBe(
+		"https://api.atlassian.com/ex/confluence/abc",
+	);
+});
+
+test("never uses the site URL as the API URL for OAuth", () => {
+	const settings = mergeSettings({
+		confluenceAuthType: "oauth2",
+		confluenceSiteUrl: "https://example.atlassian.net",
+	});
+	expect(withSiteUrlFallback(settings).confluenceBaseUrl).toBe("");
+});
+
+test("words validation issues with the setting names shown in the settings tab", () => {
+	expect(
+		describeSettingsIssue({
+			field: "confluenceBaseUrl",
+			message: "Confluence base URL is required",
+		}),
+	).toBe("Confluence API URL is required.");
+	expect(describeSettingsIssue({ field: "confluenceBaseUrl", message: "Must use HTTPS" })).toBe(
+		"Confluence API URL: Must use HTTPS",
+	);
+	expect(describeSettingsIssue({ field: "forceOverwrite", message: "Other" })).toBe("Other");
 });

@@ -54,8 +54,10 @@ If you used the original Confluence Integration plugin in this vault, this plugi
 
 1. Go to **Settings** > **Confluence Integration Plus**.
 1. In the **Authentication type** list, select your authentication type.
-1. In **Confluence API URL**, enter your site URL, such as `https://example.atlassian.net`. If you use a scoped API token, enter `https://api.atlassian.com/ex/confluence/CLOUD_ID` instead. Replace `CLOUD_ID` with your site's cloud ID.
 1. In **Confluence site URL**, enter the address that you open in a browser, such as `https://example.atlassian.net`.
+1. Leave **Confluence API URL** empty, unless one of the following applies:
+   - If you use a scoped API token or an OAuth service account, enter `https://api.atlassian.com/ex/confluence/CLOUD_ID`. Replace `CLOUD_ID` with your site's cloud ID.
+   - If you sign in with OAuth in the browser, the plugin fills in this setting when you choose your site.
 1. Enter your credentials. For the API token or client secret, select an existing secret or create one in Obsidian secret storage.
 1. In **Parent page ID**, enter the page ID that you found earlier.
 1. In **Folder to publish**, enter the vault folder that contains the notes to publish.

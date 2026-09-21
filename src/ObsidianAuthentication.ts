@@ -5,6 +5,7 @@ import {
 } from "@markdown-confluence/lib";
 import { Effect } from "effect";
 import { desktopFetch } from "./desktopFetch";
+import { describeSettingsIssue } from "./settings";
 
 /** Construct per publish so a vault left open never keeps an expired OAuth token. */
 export async function createObsidianConfluenceClient(
@@ -16,8 +17,7 @@ export async function createObsidianConfluenceClient(
 			? { ...settings, confluenceAuthType: "bearer", atlassianApiToken: oauthAccessToken }
 			: settings,
 	);
-	if (!validation.valid)
-		throw new Error(validation.issues.map((issue) => issue.message).join("\n"));
+	if (!validation.valid) throw new Error(validation.issues.map(describeSettingsIssue).join("\n"));
 	return Effect.runPromise(
 		createAuthenticatedConfluenceClient(settings, {
 			fetch: desktopFetch,

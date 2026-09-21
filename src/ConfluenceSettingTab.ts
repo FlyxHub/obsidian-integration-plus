@@ -1,7 +1,12 @@
 import { App, Notice, PluginSettingTab, SecretComponent, Setting, normalizePath } from "obsidian";
 import { DEFAULT_KROKI_SETTINGS, validateConfluenceSettings } from "@markdown-confluence/lib";
 import type ConfluencePlugin from "./main";
-import { MERMAID_THEMES, isMermaidTheme, type ObsidianPluginSettings } from "./settings";
+import {
+	MERMAID_THEMES,
+	describeSettingsIssue,
+	isMermaidTheme,
+	type ObsidianPluginSettings,
+} from "./settings";
 
 type TextField =
 	"confluenceBaseUrl" | "confluenceSiteUrl" | "atlassianUserName" | "atlassianClientId";
@@ -56,7 +61,7 @@ export class ConfluenceSettingTab extends PluginSettingTab {
 
 		containerEl.createEl("p", { text: "Fix these settings before publishing:" });
 		const list = containerEl.createEl("ul");
-		for (const issue of result.issues) list.createEl("li", { text: issue.message });
+		for (const issue of result.issues) list.createEl("li", { text: describeSettingsIssue(issue) });
 	}
 
 	private renderAuthentication(containerEl: HTMLElement, save: () => Promise<void>) {
@@ -93,18 +98,18 @@ export class ConfluenceSettingTab extends PluginSettingTab {
 		this.addText(
 			containerEl,
 			save,
-			"Confluence API URL",
-			"confluenceBaseUrl",
-			oauth
-				? "https://api.atlassian.com/ex/confluence/{cloudId}"
-				: "Your Confluence site. Scoped API tokens require https://api.atlassian.com/ex/confluence/{cloudId}.",
+			"Confluence site URL",
+			"confluenceSiteUrl",
+			"The address you open in a browser, for example https://example.atlassian.net.",
 		);
 		this.addText(
 			containerEl,
 			save,
-			"Confluence site URL",
-			"confluenceSiteUrl",
-			"The address you open in a browser, for example https://example.atlassian.net. Required when using the API gateway.",
+			"Confluence API URL",
+			"confluenceBaseUrl",
+			oauth
+				? "Required for OAuth: https://api.atlassian.com/ex/confluence/{cloudId}"
+				: "Optional. Leave empty to use the site URL. Scoped API tokens require https://api.atlassian.com/ex/confluence/{cloudId}.",
 		);
 
 		if (oauth) {

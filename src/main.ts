@@ -55,6 +55,7 @@ import {
 	migrateSecretsToStorage,
 	toPersistedSettings,
 	withResolvedSecrets,
+	withSiteUrlFallback,
 } from "./settings";
 
 const PUBLISH_FLAG = "connie-publish";
@@ -245,7 +246,7 @@ export default class ConfluencePlugin extends Plugin {
 
 	/** Settings with credentials read from secret storage, for authenticating requests only. */
 	resolvedSettings(): ObsidianPluginSettings {
-		return withResolvedSecrets(this.settings, this.app.secretStorage);
+		return withSiteUrlFallback(withResolvedSecrets(this.settings, this.app.secretStorage));
 	}
 
 	async authenticationClient() {
@@ -278,7 +279,7 @@ export default class ConfluencePlugin extends Plugin {
 		this.platform = ObsidianPlatformLive(this.app);
 		this.settingsLayer = Layer.succeed(
 			ConfluenceUploadSettings.ConfluenceSettingsService,
-			this.settings,
+			withSiteUrlFallback(this.settings),
 		);
 	}
 
@@ -493,7 +494,7 @@ export default class ConfluencePlugin extends Plugin {
 					pageId,
 					version: page.version,
 					title: page.title,
-					markdown: adfToMergeMarkdown(page.adf, this.settings.confluenceBaseUrl),
+					markdown: adfToMergeMarkdown(page.adf, this.resolvedSettings().confluenceBaseUrl),
 				});
 			} catch (error) {
 				errors.push({
