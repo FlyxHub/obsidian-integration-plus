@@ -1,4 +1,5 @@
 import type { RequiredConfluenceClient } from "@markdown-confluence/lib";
+import type { MediaRemote } from "./media";
 
 export interface RemotePage {
 	id: string;
@@ -31,8 +32,32 @@ export interface ConfluenceRemote {
 
 const BATCH_SIZE = 250;
 
-export function createConfluenceRemote(client: RequiredConfluenceClient): ConfluenceRemote {
+/** Downloads attachment bytes; see `createAttachmentDownloader`. */
+export type AttachmentDownload = (
+	client: RequiredConfluenceClient,
+	pageId: string,
+	attachmentId: string,
+) => Promise<Uint8Array>;
+
+export function createConfluenceRemote(
+	client: RequiredConfluenceClient,
+	download?: AttachmentDownload,
+): ConfluenceRemote & MediaRemote {
 	return {
+		async listAttachments(pageId) {
+			const response = await client.contentAttachments.getAttachments({ id: pageId });
+			return response.results.map((attachment) => ({
+				id: attachment.id,
+				title: attachment.title,
+				fileId: attachment.extensions.fileId,
+			}));
+		},
+
+		async downloadAttachment(pageId, attachmentId) {
+			if (!download) throw new Error("Attachment downloads aren't available here.");
+			return download(client, pageId, attachmentId);
+		},
+
 		async currentAccountId() {
 			return (await client.users.getCurrentUser()).accountId;
 		},

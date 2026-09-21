@@ -1,8 +1,12 @@
 import { MERGE_FORMAT, adfToMergeMarkdown } from "./adfMarkdown";
 import type { ConfluenceRemote, RemoteChild, RemotePage } from "./confluenceRemote";
+import { mediaReferences, type MediaResolver, type MediaSync } from "./media";
 import { hasConflictMarkers, mergeThreeWay, mergeTwoWay, splitFrontmatter } from "./merge";
 import { createPageLinkResolver, rewritePageLinks, type PageLinkResolver } from "./pageLinks";
+import { toNoteName } from "./names";
 import type { SyncStateStore } from "./syncState";
+
+export { toNoteName };
 
 /** Vault operations pull needs; implemented with the Obsidian API in main.ts. */
 export interface PullVault {
@@ -46,24 +50,35 @@ export interface ConvertedPage {
 	markdown: string;
 	/** Linked page IDs that have no note yet. */
 	unresolvedLinks: string[];
+	/** Media file IDs with no local copy; they stay `adf` fences. */
+	unresolvedMedia: string[];
 }
 
 /**
- * Convert a page to the Markdown used for merging and importing: `adfToMergeMarkdown`,
- * then links to pages that have notes become wikilinks. Base and remote must both go
- * through this, with the same resolver, or links show up as changes.
+ * Convert a page to the Markdown used for merging and importing: `adfToMergeMarkdown`, with
+ * images embedded from their local copies, then links to pages that have notes become
+ * wikilinks. Base and remote must both go through this, with the same resolvers, or links
+ * and images show up as changes.
  */
 export function convertPage(
 	adf: unknown,
 	urls: { confluenceBaseUrl: string; confluenceSiteUrl: string },
 	resolve: PageLinkResolver,
+	media: MediaResolver = () => undefined,
 ): ConvertedPage {
 	const { markdown, unresolved } = rewritePageLinks(
-		adfToMergeMarkdown(adf, urls.confluenceBaseUrl),
+		adfToMergeMarkdown(adf, urls.confluenceBaseUrl, media),
 		urls.confluenceSiteUrl || urls.confluenceBaseUrl,
 		resolve,
 	);
-	return { markdown, unresolvedLinks: unresolved };
+	const unresolvedMedia = [
+		...new Set(
+			mediaReferences(adf)
+				.map((reference) => reference.fileId)
+				.filter((fileId) => !media(fileId)),
+		),
+	];
+	return { markdown, unresolvedLinks: unresolved, unresolvedMedia };
 }
 
 interface PlannedImport {
@@ -82,6 +97,7 @@ export class PullService {
 		private readonly remote: ConfluenceRemote,
 		private readonly vault: PullVault,
 		private readonly state: SyncStateStore,
+		private readonly media?: MediaSync,
 	) {}
 
 	async pull(options: PullOptions): Promise<PullReport> {
@@ -125,7 +141,7 @@ export class PullService {
 			options.signal?.throwIfAborted();
 			options.onProgress?.(`Importing ${path}`);
 			try {
-				const converted = convertPage(page.adf, options, resolve);
+				const converted = await this.convert(page, path, options, resolve, report);
 				await this.vault.create(path, converted.markdown, frontmatter);
 				await this.recordBase(page, converted);
 				report.imported.push(path);
@@ -156,7 +172,9 @@ export class PullService {
 		// A snapshot in an older format, or with links to pages that now have notes, is
 		// converted again even if the page didn't change, so the improvement reaches the note.
 		const current =
-			base?.format === MERGE_FORMAT && !base.unresolvedLinks.some((id) => resolve(id));
+			base?.format === MERGE_FORMAT &&
+			!base.unresolvedLinks.some((id) => resolve(id)) &&
+			(!this.media || base.unresolvedMedia.length === 0);
 		if (base && current && remoteVersion === base.version) {
 			report.unchanged++;
 			return;
@@ -171,7 +189,7 @@ export class PullService {
 			return;
 		}
 
-		const remote = convertPage(page.adf, options, resolve);
+		const remote = await this.convert(page, path, options, resolve, report);
 		const { frontmatter, body } = splitFrontmatter(local);
 		let merged;
 		if (base) {
@@ -220,7 +238,14 @@ export class PullService {
 				if (visited.has(child.id)) continue;
 				visited.add(child.id);
 				try {
-					const next = await this.planChild(child, folder, pathsById, plannedPaths, options, report);
+					const next = await this.planChild(
+						child,
+						folder,
+						pathsById,
+						plannedPaths,
+						options,
+						report,
+					);
 					if (!next) continue;
 					if (next.planned) planned.push(next.planned);
 					if (depth < MAX_DEPTH)
@@ -242,8 +267,7 @@ export class PullService {
 		options: PullOptions,
 		report: PullReport,
 	): Promise<
-		| { children: RemoteChild[]; folder: string | undefined; planned?: PlannedImport }
-		| undefined
+		{ children: RemoteChild[]; folder: string | undefined; planned?: PlannedImport } | undefined
 	> {
 		const linkedPath = pathsById.get(child.id);
 		if (linkedPath) {
@@ -287,6 +311,21 @@ export class PullService {
 		};
 	}
 
+	/** Download the page's images, then convert it. Image failures are reported, not thrown. */
+	private async convert(
+		page: RemotePage,
+		path: string,
+		options: PullOptions,
+		resolve: PageLinkResolver,
+		report: PullReport,
+	): Promise<ConvertedPage> {
+		if (!this.media) return convertPage(page.adf, options, resolve);
+		const errors = await this.media.ensure(page.adf, { download: true });
+		for (const error of errors)
+			report.skipped.push({ name: path, reason: `An image wasn't downloaded: ${error}` });
+		return convertPage(page.adf, options, resolve, this.media.resolver());
+	}
+
 	private async recordBase(page: RemotePage, converted: ConvertedPage) {
 		await this.state.set({
 			pageId: page.id,
@@ -295,6 +334,7 @@ export class PullService {
 			markdown: converted.markdown,
 			format: MERGE_FORMAT,
 			unresolvedLinks: converted.unresolvedLinks,
+			unresolvedMedia: converted.unresolvedMedia,
 		});
 	}
 
@@ -332,26 +372,6 @@ export function isGeneratedFolderPage(adf: unknown): boolean {
 	if (!Array.isArray(inline) || inline.length !== 1) return false;
 	const node = inline[0] as { type?: string; attrs?: { extensionKey?: string } };
 	return node.type === "inlineExtension" && node.attrs?.extensionKey === "pagetree";
-}
-
-const RESERVED_WINDOWS_NAMES = /^(con|prn|aux|nul|com\d|lpt\d)$/i;
-
-/**
- * Turn a Confluence page title into a safe note name. Titles come from the server, so path
- * separators, characters Obsidian or the OS reject, and leading dots are all removed.
- */
-export function toNoteName(title: string, pageId: string): string {
-	let name = [...title]
-		.map((char) => (char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127 ? "-" : char))
-		.join("")
-		.replace(/[\\/:*?"<>|#^[\]]/g, "-")
-		.replace(/\s+/g, " ")
-		.trim()
-		.replace(/^[.\s]+|[.\s]+$/g, "")
-		.slice(0, 180)
-		.trim();
-	if (RESERVED_WINDOWS_NAMES.test(name)) name = `${name} page`;
-	return name || `Untitled ${pageId}`;
 }
 
 function joinPath(folder: string, name: string): string {

@@ -435,6 +435,18 @@ export class ConfluenceSettingTab extends PluginSettingTab {
 			() => this.settings.importNewPages,
 			(value) => (this.settings.importNewPages = value),
 		);
+		new Setting(containerEl)
+			.setName("Image folder")
+			.setDesc("Vault folder where pulling saves images and other attachments from Confluence.")
+			.addText((text) =>
+				text
+					.setPlaceholder("images")
+					.setValue(this.settings.imageFolder)
+					.onChange(async (value) => {
+						this.settings.imageFolder = toVaultFolder(value);
+						await this.plugin.saveSettings();
+					}),
+			);
 	}
 
 	private renderMermaid(containerEl: HTMLElement) {

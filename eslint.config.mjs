@@ -37,7 +37,7 @@ export default defineConfig([
 					],
 					acronyms: ["API", "ID", "URL", "HTTPS", "PAT", "PNG", "SVG", "TABLE", "LIST", "TASK"],
 					// Placeholders that show literal example input.
-					ignoreRegex: ["^https?://", "^docs, public$"],
+					ignoreRegex: ["^https?://", "^docs, public$", "^images$"],
 				},
 			],
 			// isDesktopOnly is true: the OAuth loopback server and HTTPS transport need Node.

@@ -28,6 +28,8 @@ export interface ObsidianPluginSettings
 	renderDataview: boolean;
 	/** When pulling all notes, create notes for new pages under the parent page. */
 	importNewPages: boolean;
+	/** Vault folder where pull saves images and other attachments. */
+	imageFolder: string;
 	mermaidTheme: MermaidTheme;
 	/** Name of the SecretStorage entry that holds the API token or PAT. */
 	apiTokenSecretName: string;
@@ -40,6 +42,7 @@ const PLUGIN_DEFAULTS = {
 	showPublishResultsModal: true,
 	renderDataview: false,
 	importNewPages: true,
+	imageFolder: "images",
 	apiTokenSecretName: "",
 	clientSecretSecretName: "",
 	oauthMode: "service-account",
