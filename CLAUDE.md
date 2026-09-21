@@ -29,7 +29,7 @@ npm run fmt          # Prettier (tabs, width 100)
 
 ## Git workflow
 
-After making changes, commit them and push to `origin` without waiting to be asked. Run `npm run typecheck`, `npm run lint` and `npm test` first, and say so if any fail. Work on a feature branch rather than `main`; push new branches with `git push -u origin <branch>`.
+After making changes, commit them and push to `origin` without waiting to be asked. Stage files by path, never with `git add -A` or `git add .`, and check `git status` before committing: this folder is a live plugin install, so it also holds runtime data (`data.json`, and `sync/` with copies of Confluence page content). Neither may ever be committed; the repository is public. Run `npm run typecheck`, `npm run lint` and `npm test` first, and say so if any fail. Work on a feature branch rather than `main`; push new branches with `git push -u origin <branch>`.
 
 ## Documentation
 
