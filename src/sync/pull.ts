@@ -1,12 +1,15 @@
 import { MERGE_FORMAT, adfToMergeMarkdown } from "./adfMarkdown";
 import type { ConfluenceRemote, RemoteChild, RemotePage } from "./confluenceRemote";
 import { hasConflictMarkers, mergeThreeWay, mergeTwoWay, splitFrontmatter } from "./merge";
+import { createPageLinkResolver, rewritePageLinks, type PageLinkResolver } from "./pageLinks";
 import type { SyncStateStore } from "./syncState";
 
 /** Vault operations pull needs; implemented with the Obsidian API in main.ts. */
 export interface PullVault {
 	/** Page ID → vault path, for every note with `connie-page-id`. */
 	linkedNotes(): Map<string, string>;
+	/** Paths of every Markdown note in the vault, to choose link text like Obsidian does. */
+	notePaths(): string[];
 	read(path: string): Promise<string>;
 	/** Replace the note's text, failing if it changed since `expected` was read. */
 	replace(path: string, expected: string, next: string): Promise<void>;
@@ -19,6 +22,8 @@ export interface PullVault {
 
 export interface PullOptions {
 	confluenceBaseUrl: string;
+	/** The browser address of the site, which page links in Confluence content point to. */
+	confluenceSiteUrl: string;
 	/** Pull only these page IDs; all linked notes when undefined. */
 	pageIds?: readonly string[];
 	/** Import pages under this root page that have no note yet. */
@@ -35,6 +40,36 @@ export interface PullReport {
 	deleted: string[];
 	skipped: { name: string; reason: string }[];
 	unchanged: number;
+}
+
+export interface ConvertedPage {
+	markdown: string;
+	/** Linked page IDs that have no note yet. */
+	unresolvedLinks: string[];
+}
+
+/**
+ * Convert a page to the Markdown used for merging and importing: `adfToMergeMarkdown`,
+ * then links to pages that have notes become wikilinks. Base and remote must both go
+ * through this, with the same resolver, or links show up as changes.
+ */
+export function convertPage(
+	adf: unknown,
+	urls: { confluenceBaseUrl: string; confluenceSiteUrl: string },
+	resolve: PageLinkResolver,
+): ConvertedPage {
+	const { markdown, unresolved } = rewritePageLinks(
+		adfToMergeMarkdown(adf, urls.confluenceBaseUrl),
+		urls.confluenceSiteUrl || urls.confluenceBaseUrl,
+		resolve,
+	);
+	return { markdown, unresolvedLinks: unresolved };
+}
+
+interface PlannedImport {
+	page: RemotePage;
+	path: string;
+	frontmatter: Record<string, string>;
 }
 
 const FOLDER_NOTE_NAMES = ["index", "README", "readme"];
@@ -60,22 +95,44 @@ export class PullService {
 			unchanged: 0,
 		};
 		const linked = this.vault.linkedNotes();
+		const pathsById = new Map(linked);
+		// Plan imports before converting anything, so every pulled or imported note can link
+		// to pages imported in this same pull.
+		const planned =
+			options.importUnder && !options.pageIds
+				? await this.planImports(options, pathsById, report)
+				: [];
+		const resolve = createPageLinkResolver(pathsById, [
+			...this.vault.notePaths(),
+			...planned.map((entry) => entry.path),
+		]);
+
 		const ids = options.pageIds ?? [...linked.keys()];
 		const versions = await this.remote.getVersions(ids);
-
 		for (const [index, pageId] of ids.entries()) {
 			options.signal?.throwIfAborted();
 			const path = linked.get(pageId);
 			if (!path) continue;
 			options.onProgress?.(`Pulling ${index + 1} of ${ids.length}: ${path}`);
 			try {
-				await this.pullNote(pageId, path, versions.get(pageId)?.version, options, report);
+				await this.pullNote(pageId, path, versions.get(pageId)?.version, options, resolve, report);
 			} catch (error) {
 				report.skipped.push({ name: path, reason: messageOf(error) });
 			}
 		}
 
-		if (options.importUnder && !options.pageIds) await this.importPages(options, linked, report);
+		for (const { page, path, frontmatter } of planned) {
+			options.signal?.throwIfAborted();
+			options.onProgress?.(`Importing ${path}`);
+			try {
+				const converted = convertPage(page.adf, options, resolve);
+				await this.vault.create(path, converted.markdown, frontmatter);
+				await this.recordBase(page, converted);
+				report.imported.push(path);
+			} catch (error) {
+				report.skipped.push({ name: page.title, reason: messageOf(error) });
+			}
+		}
 		return report;
 	}
 
@@ -84,6 +141,7 @@ export class PullService {
 		path: string,
 		remoteVersion: number | undefined,
 		options: PullOptions,
+		resolve: PageLinkResolver,
 		report: PullReport,
 	) {
 		const local = await this.vault.read(path);
@@ -95,9 +153,10 @@ export class PullService {
 			return;
 		}
 		const base = await this.state.get(pageId);
-		// A snapshot in an older format is converted again even if the page didn't change, so
-		// formatting improvements reach notes that were already pulled.
-		const current = base?.format === MERGE_FORMAT;
+		// A snapshot in an older format, or with links to pages that now have notes, is
+		// converted again even if the page didn't change, so the improvement reaches the note.
+		const current =
+			base?.format === MERGE_FORMAT && !base.unresolvedLinks.some((id) => resolve(id));
 		if (base && current && remoteVersion === base.version) {
 			report.unchanged++;
 			return;
@@ -112,19 +171,19 @@ export class PullService {
 			return;
 		}
 
-		const remoteMarkdown = adfToMergeMarkdown(page.adf, options.confluenceBaseUrl);
+		const remote = convertPage(page.adf, options, resolve);
 		const { frontmatter, body } = splitFrontmatter(local);
 		let merged;
 		if (base) {
-			merged = mergeThreeWay(body, base.markdown, remoteMarkdown);
+			merged = mergeThreeWay(body, base.markdown, remote.markdown);
 		} else if (page.authorId === (await this.currentAccountId())) {
 			// Published before pull existed and not edited by anyone else since: Confluence
 			// holds our own content, so record it as the base without touching the note.
-			await this.recordBase(page, remoteMarkdown);
+			await this.recordBase(page, remote);
 			report.unchanged++;
 			return;
 		} else {
-			merged = mergeTwoWay(body, remoteMarkdown);
+			merged = mergeTwoWay(body, remote.markdown);
 		}
 
 		if (merged.text !== body) await this.vault.replace(path, local, frontmatter + merged.text);
@@ -132,16 +191,22 @@ export class PullService {
 			await this.vault.setFrontmatter(path, { "connie-title": page.title });
 			report.renamed.push({ path, title: page.title });
 		}
-		await this.recordBase(page, remoteMarkdown);
+		await this.recordBase(page, remote);
 
 		if (merged.conflicts > 0) report.conflicted.push(path);
 		else if (merged.text !== body) report.updated.push(path);
 		else report.unchanged++;
 	}
 
-	private async importPages(options: PullOptions, linked: Map<string, string>, report: PullReport) {
+	/** Walk the page tree under the root and decide where each new page's note will go. */
+	private async planImports(
+		options: PullOptions,
+		pathsById: Map<string, string>,
+		report: PullReport,
+	): Promise<PlannedImport[]> {
 		const { rootPageId } = options.importUnder!;
-		const pathsById = linked;
+		const planned: PlannedImport[] = [];
+		const plannedPaths = new Set<string>();
 		const visited = new Set<string>([rootPageId]);
 		const rootChildren = await this.remote.listChildren(rootPageId);
 		const rootFolder = inferRootFolder(rootChildren, pathsById) ?? options.importUnder!.rootFolder;
@@ -155,23 +220,31 @@ export class PullService {
 				if (visited.has(child.id)) continue;
 				visited.add(child.id);
 				try {
-					const next = await this.importChild(child, folder, pathsById, options, report);
-					if (next && depth < MAX_DEPTH) queue.push({ ...next, depth: depth + 1 });
+					const next = await this.planChild(child, folder, pathsById, plannedPaths, options, report);
+					if (!next) continue;
+					if (next.planned) planned.push(next.planned);
+					if (depth < MAX_DEPTH)
+						queue.push({ children: next.children, folder: next.folder, depth: depth + 1 });
 				} catch (error) {
 					report.skipped.push({ name: child.title, reason: messageOf(error) });
 				}
 			}
 		}
+		return planned;
 	}
 
-	/** Import one page if needed; returns its children to visit, with their local folder. */
-	private async importChild(
+	/** Plan one page's import if needed; returns its children to visit, with their local folder. */
+	private async planChild(
 		child: RemoteChild,
 		folder: string | undefined,
 		pathsById: Map<string, string>,
+		plannedPaths: Set<string>,
 		options: PullOptions,
 		report: PullReport,
-	): Promise<{ children: RemoteChild[]; folder: string | undefined } | undefined> {
+	): Promise<
+		| { children: RemoteChild[]; folder: string | undefined; planned?: PlannedImport }
+		| undefined
+	> {
 		const linkedPath = pathsById.get(child.id);
 		if (linkedPath) {
 			const children = await this.remote.listChildren(child.id);
@@ -186,7 +259,7 @@ export class PullService {
 			return undefined;
 		}
 
-		options.onProgress?.(`Importing ${child.title}`);
+		options.onProgress?.(`Checking ${child.title}`);
 		const page = await this.remote.getPage(child.id);
 		if (!page) return undefined;
 		const name = toNoteName(page.title, page.id);
@@ -196,30 +269,32 @@ export class PullService {
 
 		const path =
 			children.length > 0 ? joinPath(childFolder, `${name}.md`) : joinPath(folder, `${name}.md`);
-		if (this.vault.exists(path)) {
+		if (this.vault.exists(path) || plannedPaths.has(path)) {
 			report.skipped.push({
 				name: page.title,
 				reason: `A note already exists at ${path}. Add connie-page-id: ${page.id} to it to link it.`,
 			});
 			return undefined;
 		}
-		const markdown = adfToMergeMarkdown(page.adf, options.confluenceBaseUrl);
 		const frontmatter: Record<string, string> = { "connie-page-id": page.id };
 		if (name !== page.title) frontmatter["connie-title"] = page.title;
-		await this.vault.create(path, markdown, frontmatter);
-		await this.recordBase(page, markdown);
 		pathsById.set(page.id, path);
-		report.imported.push(path);
-		return { children, folder: children.length > 0 ? childFolder : undefined };
+		plannedPaths.add(path);
+		return {
+			children,
+			folder: children.length > 0 ? childFolder : undefined,
+			planned: { page, path, frontmatter },
+		};
 	}
 
-	private async recordBase(page: RemotePage, markdown: string) {
+	private async recordBase(page: RemotePage, converted: ConvertedPage) {
 		await this.state.set({
 			pageId: page.id,
 			version: page.version,
 			title: page.title,
-			markdown,
+			markdown: converted.markdown,
 			format: MERGE_FORMAT,
+			unresolvedLinks: converted.unresolvedLinks,
 		});
 	}
 

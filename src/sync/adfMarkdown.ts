@@ -38,9 +38,9 @@ export function adfToMergeMarkdown(input: unknown, confluenceBaseUrl: string): s
  * Version of `adfToMergeMarkdown`'s output. Bump it whenever the output for the same ADF
  * changes: snapshots from an older version are converted again on the next pull, and the
  * difference is merged into notes as a formatting update.
- * 1: initial. 2: panels as callouts.
+ * 1: initial. 2: panels as callouts. 3: links to pages with notes as wikilinks.
  */
-export const MERGE_FORMAT = 2;
+export const MERGE_FORMAT = 3;
 
 /** Confluence panel types and the Obsidian callout type that publishes back to each. */
 const PANEL_CALLOUTS: Record<string, string> = {

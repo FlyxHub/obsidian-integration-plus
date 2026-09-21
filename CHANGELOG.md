@@ -13,6 +13,7 @@ First release as Confluence Integration Plus, forked from Confluence Integration
 - Stop a publish when Confluence has changes that you haven't pulled, or when a note still has conflict markers.
 - Import settings from the original Confluence Integration plugin the first time the plugin loads.
 - Pull Confluence info, note, warning, success, and error panels as Obsidian callouts. Notes that were already pulled are reformatted on the next pull.
+- Pull links to other Confluence pages as wikilinks to their notes, including links between pages imported in the same pull. Notes that were already pulled are updated on the next pull.
 
 ### Security
 

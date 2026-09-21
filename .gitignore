@@ -24,4 +24,4 @@ data.json
 coverage
 
 # pull snapshots: copies of Confluence page content, never commit
-sync/
+/sync/

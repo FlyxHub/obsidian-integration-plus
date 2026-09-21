@@ -14,6 +14,7 @@ import type { SyncBase, SyncStateStore } from "./syncState";
 
 const BASE_URL = "https://example.atlassian.net";
 const ME = "me";
+const OPTIONS = { confluenceBaseUrl: BASE_URL, confluenceSiteUrl: BASE_URL };
 const adf = (markdown: string) => parseMarkdownToADF(markdown, BASE_URL);
 const folderPageAdf = {
 	type: "doc",
@@ -81,6 +82,7 @@ function fakeVault(files: Record<string, string>) {
 		},
 		setFrontmatter: async (path, values) =>
 			void frontmatter.set(path, { ...frontmatter.get(path), ...values }),
+		notePaths: () => Object.keys(files),
 		exists: (path) => path in files,
 		create: async (path, body, values) => {
 			files[path] = body;
@@ -96,6 +98,7 @@ const base = (id: string, markdown: string, version: number): SyncBase => ({
 	title: `Page ${id}`,
 	markdown: adfToMergeMarkdown(adf(markdown), BASE_URL),
 	format: MERGE_FORMAT,
+	unresolvedLinks: [],
 });
 
 test("pull merges a Confluence edit into the note and keeps frontmatter and local-only syntax", async () => {
@@ -105,7 +108,7 @@ test("pull merges a Confluence edit into the note and keeps frontmatter and loca
 	const { store, bases } = fakeState([base("1", published, 3)]);
 	const remote = fakeRemote([page("1", "Intro.\n\nOutro, edited.\n", 4)]);
 
-	const report = await new PullService(remote, vault, store).pull({ confluenceBaseUrl: BASE_URL });
+	const report = await new PullService(remote, vault, store).pull(OPTIONS);
 
 	expect(report.updated).toEqual(["Docs/Note.md"]);
 	expect(files["Docs/Note.md"]).toBe(
@@ -118,7 +121,7 @@ test("pull skips pages whose version matches the base", async () => {
 	const { vault } = fakeVault({ "A.md": '---\nconnie-page-id: "1"\n---\nText.\n' });
 	const { store } = fakeState([base("1", "Text.\n", 2)]);
 	const remote = fakeRemote([page("1", "Text.\n", 2)]);
-	const report = await new PullService(remote, vault, store).pull({ confluenceBaseUrl: BASE_URL });
+	const report = await new PullService(remote, vault, store).pull(OPTIONS);
 	expect(report.unchanged).toBe(1);
 	expect(report.updated).toEqual([]);
 });
@@ -127,7 +130,7 @@ test("pull writes conflict markers when both sides changed the same block", asyn
 	const { vault, files } = fakeVault({ "A.md": '---\nconnie-page-id: "1"\n---\nLocal.\n' });
 	const { store, bases } = fakeState([base("1", "Original.\n", 1)]);
 	const remote = fakeRemote([page("1", "Remote.\n", 2)]);
-	const report = await new PullService(remote, vault, store).pull({ confluenceBaseUrl: BASE_URL });
+	const report = await new PullService(remote, vault, store).pull(OPTIONS);
 	expect(report.conflicted).toEqual(["A.md"]);
 	expect(files["A.md"]).toContain("<<<<<<< Obsidian\nLocal.\n=======\nRemote.\n>>>>>>> Confluence");
 	expect(bases.get("1")?.version).toBe(2);
@@ -139,7 +142,7 @@ test("pull refuses notes that still have conflict markers", async () => {
 	const { vault, files } = fakeVault({ "A.md": text });
 	const { store } = fakeState([base("1", "x\n", 1)]);
 	const report = await new PullService(fakeRemote([page("1", "y\n", 2)]), vault, store).pull({
-		confluenceBaseUrl: BASE_URL,
+		...OPTIONS,
 	});
 	expect(report.skipped[0]?.reason).toMatch(/conflict markers/);
 	expect(files["A.md"]).toBe(text);
@@ -150,7 +153,7 @@ test("pull with no base records our own last publish without changing the note",
 	const { vault, files } = fakeVault({ "A.md": note });
 	const { store, bases } = fakeState();
 	const remote = fakeRemote([page("1", "Published text.\n", 5, { authorId: ME })]);
-	const report = await new PullService(remote, vault, store).pull({ confluenceBaseUrl: BASE_URL });
+	const report = await new PullService(remote, vault, store).pull(OPTIONS);
 	expect(files["A.md"]).toBe(note);
 	expect(report.unchanged).toBe(1);
 	expect(bases.get("1")?.version).toBe(5);
@@ -160,7 +163,7 @@ test("pull with no base marks every difference when another user edited the page
 	const { vault, files } = fakeVault({ "A.md": '---\nconnie-page-id: "1"\n---\nMine.\n' });
 	const { store } = fakeState();
 	const report = await new PullService(fakeRemote([page("1", "Theirs.\n", 2)]), vault, store).pull({
-		confluenceBaseUrl: BASE_URL,
+		...OPTIONS,
 	});
 	expect(report.conflicted).toEqual(["A.md"]);
 	expect(files["A.md"]).toContain("<<<<<<< Obsidian\nMine.\n=======\nTheirs.\n");
@@ -170,7 +173,7 @@ test("pull records a Confluence title change in connie-title", async () => {
 	const { vault, frontmatter } = fakeVault({ "A.md": '---\nconnie-page-id: "1"\n---\nText.\n' });
 	const { store } = fakeState([base("1", "Text.\n", 1)]);
 	const remote = fakeRemote([page("1", "Text.\n", 2, { title: "Renamed" })]);
-	const report = await new PullService(remote, vault, store).pull({ confluenceBaseUrl: BASE_URL });
+	const report = await new PullService(remote, vault, store).pull(OPTIONS);
 	expect(report.renamed).toEqual([{ path: "A.md", title: "Renamed" }]);
 	expect(frontmatter.get("A.md")).toEqual({ "connie-title": "Renamed" });
 });
@@ -178,7 +181,7 @@ test("pull records a Confluence title change in connie-title", async () => {
 test("pull reports notes whose page was deleted", async () => {
 	const { vault } = fakeVault({ "A.md": '---\nconnie-page-id: "9"\n---\nText.\n' });
 	const report = await new PullService(fakeRemote([]), vault, fakeState().store).pull({
-		confluenceBaseUrl: BASE_URL,
+		...OPTIONS,
 	});
 	expect(report.deleted).toEqual(["A.md"]);
 });
@@ -209,7 +212,7 @@ test("import creates notes and folders for new pages, and skips generated folder
 		},
 	);
 	const report = await new PullService(remote, vault, store).pull({
-		confluenceBaseUrl: BASE_URL,
+		...OPTIONS,
 		importUnder: { rootPageId: "root", rootFolder: "Fallback" },
 	});
 
@@ -251,7 +254,7 @@ test("import skips children of a regular note and never overwrites an existing n
 		vault,
 		fakeState([base("20", "Leaf.\n", 1)]).store,
 	).pull({
-		confluenceBaseUrl: BASE_URL,
+		...OPTIONS,
 		importUnder: { rootPageId: "root", rootFolder: "Docs" },
 	});
 	expect(report.imported).toEqual([]);
@@ -305,11 +308,60 @@ test("pull reformats notes whose snapshot came from an older converter, without 
 	const note = `---\nconnie-page-id: "1"\n---\nIntro.\n\n${oldFence}`;
 	const { vault, files } = fakeVault({ "A.md": note });
 	const { store, bases } = fakeState([
-		{ pageId: "1", version: 3, title: "Page 1", markdown: `Intro.\n\n${oldFence}`, format: 1 },
+		{ pageId: "1", version: 3, title: "Page 1", markdown: `Intro.\n\n${oldFence}`, format: 1, unresolvedLinks: [] },
 	]);
 	const remote = fakeRemote([page("1", "Intro.\n\n> [!warning] Careful.\n", 3)]);
-	const report = await new PullService(remote, vault, store).pull({ confluenceBaseUrl: BASE_URL });
+	const report = await new PullService(remote, vault, store).pull(OPTIONS);
 	expect(report.updated).toEqual(["A.md"]);
 	expect(files["A.md"]).toBe('---\nconnie-page-id: "1"\n---\nIntro.\n\n> [!warning]\n> Careful.\n');
 	expect(bases.get("1")?.format).toBe(MERGE_FORMAT);
+});
+
+test("imported pages link to each other and to existing notes as wikilinks", async () => {
+	const pageUrl = (id: string) => `${BASE_URL}/wiki/spaces/IT/pages/${id}/Title`;
+	const { vault, files } = fakeVault({
+		"Docs/Existing.md": '---\nconnie-page-id: "10"\n---\nText.\n',
+	});
+	const remote = fakeRemote(
+		[
+			page("10", "Text.\n", 1),
+			page("11", `See [Second](${pageUrl("12")}) and [Existing](${pageUrl("10")}).\n`, 1, {
+				title: "First",
+			}),
+			page("12", `Back to [First](${pageUrl("11")}).\n`, 1, { title: "Second" }),
+		],
+		{
+			root: [
+				{ id: "10", title: "Existing" },
+				{ id: "11", title: "First" },
+				{ id: "12", title: "Second" },
+			],
+		},
+	);
+	await new PullService(remote, vault, fakeState([base("10", "Text.\n", 1)]).store).pull({
+		...OPTIONS,
+		importUnder: { rootPageId: "root", rootFolder: "Docs" },
+	});
+	expect(files["Docs/First.md"]).toBe("See [[Second]] and [[Existing]].\n");
+	expect(files["Docs/Second.md"]).toBe("Back to [[First]].\n");
+});
+
+test("a note is converted again once a page it links to gets a note", async () => {
+	const link = `[Later](${BASE_URL}/wiki/spaces/IT/pages/20/Later)`;
+	const note = `---\nconnie-page-id: "1"\n---\nSee ${link}.\n`;
+	const { vault, files } = fakeVault({ "A.md": note });
+	const { store, bases } = fakeState([
+		{ ...base("1", `See ${link}.\n`, 2), unresolvedLinks: ["20"] },
+	]);
+	const remote = fakeRemote([page("1", `See ${link}.\n`, 2)]);
+	const service = new PullService(remote, vault, store);
+
+	await service.pull(OPTIONS);
+	expect(files["A.md"]).toBe(note);
+
+	files["Later.md"] = '---\nconnie-page-id: "20"\n---\nLater.\n';
+	const report = await service.pull(OPTIONS);
+	expect(report.updated).toEqual(["A.md"]);
+	expect(files["A.md"]).toBe('---\nconnie-page-id: "1"\n---\nSee [[Later]].\n');
+	expect(bases.get("1")?.unresolvedLinks).toEqual([]);
 });
