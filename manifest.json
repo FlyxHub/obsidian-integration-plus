@@ -2,8 +2,8 @@
 	"id": "confluence-integration",
 	"name": "Confluence Integration",
 	"version": "7.0.0",
-	"minAppVersion": "1.0.0",
-	"description": "This plugin allows you to publish your notes to Confluence",
+	"minAppVersion": "1.11.4",
+	"description": "Publish notes from your vault to Atlassian Confluence.",
 	"author": "andymac4182",
 	"authorUrl": "https://github.com/andymac4182",
 	"isDesktopOnly": true

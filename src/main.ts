@@ -1,111 +1,378 @@
-import { Plugin, Notice, MarkdownView, Workspace, loadMermaid } from "obsidian";
 import {
-	ConfluenceUploadSettings,
-	Publisher,
+	FrontMatterCache,
+	MarkdownView,
+	Notice,
+	Plugin,
+	TFile,
+	Vault,
+	loadMermaid,
+	normalizePath,
+} from "obsidian";
+import {
+	ADFProcessingPlugin,
 	ConfluencePageConfig,
-	StaticSettingsLoader,
-	renderADFDoc,
+	ConfluenceUploadSettings,
+	HttpKrokiRenderer,
+	KrokiRendererPlugin,
+	MarkdownConfluencePlatform,
+	MarkdownSourceTransformerService,
+	MarkdownWorkspaceLive,
+	MarkdownWorkspaceService,
+	MathRendererPlugin,
 	MermaidRendererPlugin,
-	UploadAdfFileResult,
+	PlantumlRendererPlugin,
+	Publisher,
+	shouldPublishMarkdownFile,
 } from "@markdown-confluence/lib";
-import { ElectronMermaidRenderer } from "@markdown-confluence/mermaid-electron-renderer";
-import { ConfluenceSettingTab } from "./ConfluenceSettingTab";
-import ObsidianAdaptor from "./adaptors/obsidian";
-import { CompletedModal } from "./CompletedModal";
-import { ObsidianConfluenceClient } from "./MyBaseClient";
+import { Effect, Layer } from "effect";
+import {
+	ElectronMathRenderer,
+	ElectronMermaidRenderer,
+} from "@markdown-confluence/mermaid-electron-renderer";
+import { HttpPlantumlRenderer } from "@markdown-confluence/plantuml-renderer";
+import type { MermaidConfig } from "mermaid";
+import { BrowserOAuth } from "./BrowserOAuth";
+import { CompletedModal, type UploadResults } from "./CompletedModal";
 import {
 	ConfluencePerPageForm,
-	ConfluencePerPageUIValues,
 	mapFrontmatterToConfluencePerPageUIValues,
 } from "./ConfluencePerPageForm";
-import { Mermaid } from "mermaid";
+import { ConfluenceSettingTab } from "./ConfluenceSettingTab";
+import { createDataviewTransformer } from "./DataviewTransformer";
+import { krokiFetch } from "./KrokiFetch";
+import { createObsidianConfluenceClient } from "./ObsidianAuthentication";
+import { ObsidianPlatformLive } from "./effects/ObsidianPlatform";
+import {
+	ObsidianPluginSettings,
+	mergeSettings,
+	migrateSecretsToStorage,
+	toPersistedSettings,
+	withResolvedSecrets,
+} from "./settings";
 
-export interface ObsidianPluginSettings
-	extends ConfluenceUploadSettings.ConfluenceSettings {
-	mermaidTheme:
-		| "match-obsidian"
-		| "light-obsidian"
-		| "dark-obsidian"
-		| "default"
-		| "neutral"
-		| "dark"
-		| "forest";
+const PUBLISH_FLAG = "connie-publish";
+
+/** Obsidian's bundled Mermaid; only the part used to copy the user's diagram config. */
+interface ObsidianMermaid {
+	mermaidAPI: { getConfig(): MermaidConfig };
 }
 
-interface FailedFile {
-	fileName: string;
-	reason: string;
-}
-
-interface UploadResults {
-	errorMessage: string | null;
-	failedFiles: FailedFile[];
-	filesUploadResult: UploadAdfFileResult[];
-}
+/** Undocumented but long-standing Vault API for reading app config such as the active theme. */
+type VaultWithConfig = Vault & { getConfig?: (key: string) => unknown };
 
 export default class ConfluencePlugin extends Plugin {
 	settings!: ObsidianPluginSettings;
 	private isSyncing = false;
-	workspace!: Workspace;
-	publisher!: Publisher;
-	adaptor!: ObsidianAdaptor;
+	private publishAbort: AbortController | undefined;
+	private publishStatus: HTMLElement | undefined;
+	private platform!: Layer.Layer<MarkdownConfluencePlatform>;
+	private settingsLayer!: Layer.Layer<ConfluenceUploadSettings.ConfluenceSettingsService>;
 
-	activeLeafPath(workspace: Workspace) {
-		return workspace.getActiveViewOfType(MarkdownView)?.file?.path;
+	browserOAuth = new BrowserOAuth(
+		() => this.settings,
+		() => this.app.secretStorage,
+		() => this.saveSettings(),
+		(url) => {
+			window.open(url, "_blank", "noopener,noreferrer");
+		},
+	);
+
+	override async onload() {
+		await this.loadSettings();
+
+		this.publishStatus = this.addStatusBarItem();
+		this.publishStatus.addClass("confluence-publish-status");
+		this.registerDomEvent(this.publishStatus, "click", () => this.cancelPublish());
+
+		this.addRibbonIcon("cloud", "Publish to Confluence", () => {
+			void this.runPublish();
+		});
+
+		this.addCommand({
+			id: "publish-current",
+			name: "Publish current note",
+			checkCallback: (checking) => {
+				const activePath = this.app.workspace.getActiveViewOfType(MarkdownView)?.file?.path;
+				if (!activePath) return false;
+				if (!checking) void this.runPublish(activePath);
+				return true;
+			},
+		});
+
+		this.addCommand({
+			id: "publish-all",
+			name: "Publish all notes",
+			callback: () => {
+				void this.runPublish();
+			},
+		});
+
+		this.addCommand({
+			id: "cancel-publish",
+			name: "Cancel publishing after the current request",
+			checkCallback: (checking) => {
+				if (!this.isSyncing) return false;
+				if (!checking) this.cancelPublish();
+				return true;
+			},
+		});
+
+		this.addCommand({
+			id: "enable-publishing",
+			name: "Enable publishing for current note",
+			editorCheckCallback: (checking, _editor, view) => {
+				const file = view.file;
+				if (!file || this.isPublished(file) || this.isExcluded(file)) return false;
+				if (!checking) void this.setPublishFlag(file, true);
+				return true;
+			},
+		});
+
+		this.addCommand({
+			id: "disable-publishing",
+			name: "Disable publishing for current note",
+			editorCheckCallback: (checking, _editor, view) => {
+				const file = view.file;
+				if (!file || !this.isPublished(file)) return false;
+				if (!checking) void this.setPublishFlag(file, false);
+				return true;
+			},
+		});
+
+		this.addCommand({
+			id: "page-settings",
+			name: "Edit page settings for current note",
+			editorCheckCallback: (checking, _editor, view) => {
+				const file = view.file;
+				if (!file) return false;
+				if (!checking) this.openPageSettings(file);
+				return true;
+			},
+		});
+
+		this.addSettingTab(new ConfluenceSettingTab(this.app, this));
 	}
 
-	async init() {
-		await this.loadSettings();
-		const { vault, metadataCache, workspace } = this.app;
-		this.workspace = workspace;
-		this.adaptor = new ObsidianAdaptor(
-			vault,
-			metadataCache,
+	override onunload() {
+		this.browserOAuth.cancel();
+		this.publishAbort?.abort();
+	}
+
+	async loadSettings() {
+		this.settings = mergeSettings(await this.loadData());
+		if (migrateSecretsToStorage(this.settings, this.app.secretStorage)) {
+			await this.saveSettings();
+			new Notice(
+				"Confluence credentials were moved from plugin data into Obsidian secret storage.",
+			);
+			return;
+		}
+		this.buildLayers();
+	}
+
+	async saveSettings() {
+		await this.saveData(toPersistedSettings(this.settings));
+		this.buildLayers();
+	}
+
+	/** Settings with credentials read from secret storage, for authenticating requests only. */
+	resolvedSettings(): ObsidianPluginSettings {
+		return withResolvedSecrets(this.settings, this.app.secretStorage);
+	}
+
+	async authenticationClient() {
+		const settings = this.resolvedSettings();
+		const browser = settings.confluenceAuthType === "oauth2" && settings.oauthMode === "browser";
+		if (browser) {
+			const site = settings.oauthSites.find((item) => item.id === settings.oauthSiteId);
+			if (!site) throw new Error("Connect and choose a Confluence site in settings.");
+			if (settings.confluenceBaseUrl !== `https://api.atlassian.com/ex/confluence/${site.id}`)
+				throw new Error(
+					"The selected OAuth site differs from the publish destination. Choose your site again.",
+				);
+		}
+		return createObsidianConfluenceClient(
+			settings,
+			browser ? await this.browserOAuth.accessToken() : undefined,
+		);
+	}
+
+	async selectOAuthSite(id: string) {
+		const site = this.settings.oauthSites.find((item) => item.id === id);
+		if (!site) throw new Error("Choose an authorized Confluence site.");
+		this.settings.oauthSiteId = id;
+		this.settings.confluenceBaseUrl = `https://api.atlassian.com/ex/confluence/${site.id}`;
+		this.settings.confluenceSiteUrl = site.url;
+		await this.saveSettings();
+	}
+
+	private buildLayers() {
+		this.platform = ObsidianPlatformLive(this.app);
+		this.settingsLayer = Layer.succeed(
+			ConfluenceUploadSettings.ConfluenceSettingsService,
 			this.settings,
-			this.app,
+		);
+	}
+
+	private isPublished(file: TFile): boolean {
+		return shouldPublishMarkdownFile(file.path, this.frontmatter(file), this.settings);
+	}
+
+	/** Excluded folders override `connie-publish: true`, so enabling there would have no effect. */
+	private isExcluded(file: TFile): boolean {
+		return !shouldPublishMarkdownFile(file.path, { [PUBLISH_FLAG]: true }, this.settings);
+	}
+
+	/** Whether the note is selected by folder or tag alone, ignoring its `connie-publish` flag. */
+	private isPublishedByDefault(file: TFile): boolean {
+		const frontmatter: Record<string, unknown> = { ...this.frontmatter(file) };
+		delete frontmatter[PUBLISH_FLAG];
+		return shouldPublishMarkdownFile(file.path, frontmatter, this.settings);
+	}
+
+	private frontmatter(file: TFile): FrontMatterCache | undefined {
+		return this.app.metadataCache.getFileCache(file)?.frontmatter;
+	}
+
+	private async setPublishFlag(file: TFile, publish: boolean) {
+		const byDefault = this.isPublishedByDefault(file);
+		try {
+			await this.app.fileManager.processFrontMatter(
+				file,
+				(frontmatter: Record<string, unknown>) => {
+					if (publish === byDefault) delete frontmatter[PUBLISH_FLAG];
+					else frontmatter[PUBLISH_FLAG] = publish;
+				},
+			);
+		} catch (error) {
+			new Notice(`Could not update ${file.name}: ${toError(error).message}`);
+		}
+	}
+
+	private openPageSettings(file: TFile) {
+		new ConfluencePerPageForm(this.app, {
+			config: ConfluencePageConfig.conniePerPageConfig,
+			initialValues: mapFrontmatterToConfluencePerPageUIValues(this.frontmatter(file)),
+			onSubmit: async (values, close) => {
+				const config = ConfluencePageConfig.conniePerPageConfig;
+				try {
+					await this.app.fileManager.processFrontMatter(
+						file,
+						(frontmatter: Record<string, unknown>) => {
+							for (const [property, entry] of Object.entries(values)) {
+								if (!entry.isSet) continue;
+								const { key } = config[property as keyof typeof config];
+								frontmatter[key] = entry.value;
+							}
+						},
+					);
+					close();
+				} catch (error) {
+					new Notice(`Could not update ${file.name}: ${toError(error).message}`);
+				}
+			},
+		}).open();
+	}
+
+	private cancelPublish() {
+		if (!this.publishAbort) return;
+		this.publishAbort.abort();
+		new Notice("Cancellation requested. Completed writes will be kept.");
+	}
+
+	private async runPublish(publishFilter?: string): Promise<void> {
+		if (this.isSyncing) {
+			new Notice("A Confluence publish is already in progress.");
+			return;
+		}
+
+		this.isSyncing = true;
+		this.publishAbort = new AbortController();
+		try {
+			this.showPublishResults(await this.doPublish(this.publishAbort.signal, publishFilter));
+		} catch (error) {
+			this.showPublishResults({
+				errorMessage: toError(error).message,
+				failedFiles: [],
+				filesUploadResult: [],
+			});
+		} finally {
+			this.isSyncing = false;
+			this.publishAbort = undefined;
+			this.publishStatus?.empty();
+		}
+	}
+
+	private async doPublish(signal: AbortSignal, publishFilter?: string): Promise<UploadResults> {
+		const publisher = await this.createPublisher();
+		const results = await this.runObsidianEffect(
+			publisher.publishEffect(publishFilter, { signal }),
 		);
 
+		const uploadResults: UploadResults = {
+			errorMessage: null,
+			failedFiles: [],
+			filesUploadResult: [],
+		};
+		for (const result of results) {
+			if (result.successfulUploadResult) {
+				uploadResults.filesUploadResult.push(result.successfulUploadResult);
+			} else {
+				uploadResults.failedFiles.push({
+					fileName: result.node.file.absoluteFilePath,
+					reason: result.reason ?? "No reason provided",
+				});
+			}
+		}
+		return uploadResults;
+	}
+
+	private async createPublisher() {
+		const settings = this.resolvedSettings();
+		const confluenceClient = await this.authenticationClient();
 		const mermaidItems = await this.getMermaidItems();
 		const mermaidRenderer = new ElectronMermaidRenderer(
 			mermaidItems.extraStyleSheets,
 			mermaidItems.extraStyles,
 			mermaidItems.mermaidConfig,
 			mermaidItems.bodyStyles,
+			settings.mermaid,
 		);
-		const confluenceClient = new ObsidianConfluenceClient({
-			host: this.settings.confluenceBaseUrl,
-			authentication: {
-				basic: {
-					email: this.settings.atlassianUserName,
-					apiToken: this.settings.atlassianApiToken,
-				},
-			},
-			middlewares: {
-				onError(e) {
-					if ("response" in e && e.response && "data" in e.response) {
-						e.message =
-							typeof e.response.data === "string"
-								? e.response.data
-								: JSON.stringify(e.response.data);
-					}
-				},
-			},
-		});
 
-		const settingsLoader = new StaticSettingsLoader(this.settings);
-		this.publisher = new Publisher(
-			this.adaptor,
-			settingsLoader,
-			confluenceClient,
-			[new MermaidRendererPlugin(mermaidRenderer)],
-		);
+		const plugins: ADFProcessingPlugin<unknown, unknown>[] = [
+			new MathRendererPlugin(new ElectronMathRenderer()),
+			new MermaidRendererPlugin(mermaidRenderer),
+		];
+
+		if (settings.kroki?.enabled)
+			plugins.push(
+				new KrokiRendererPlugin(
+					new HttpKrokiRenderer({ ...settings.kroki, fetchImpl: krokiFetch }),
+				),
+			);
+		if (settings.plantuml.enabled) {
+			if (settings.plantuml.serverUrl) {
+				plugins.push(
+					new PlantumlRendererPlugin(
+						new HttpPlantumlRenderer({ serverUrl: settings.plantuml.serverUrl }),
+					),
+				);
+			} else {
+				new Notice(
+					"PlantUML rendering is enabled but the PlantUML server URL is empty. Set it in the plugin settings.",
+				);
+			}
+		}
+
+		return new Publisher(settings, confluenceClient, plugins, (message) => {
+			this.publishStatus?.setText(`${message} · click to cancel`);
+		});
 	}
 
-	async getMermaidItems() {
+	private async getMermaidItems() {
 		const extraStyles: string[] = [];
 		const extraStyleSheets: string[] = [];
 		let bodyStyles = "";
-		const body = document.querySelector("body") as HTMLBodyElement;
 
 		switch (this.settings.mermaidTheme) {
 			case "default":
@@ -115,387 +382,102 @@ export default class ConfluencePlugin extends Plugin {
 				return {
 					extraStyleSheets,
 					extraStyles,
-					mermaidConfig: { theme: this.settings.mermaidTheme },
+					mermaidConfig: { theme: this.settings.mermaidTheme } satisfies MermaidConfig,
 					bodyStyles,
 				};
 			case "match-obsidian":
-				bodyStyles = body.className;
+				bodyStyles = document.body.className;
 				break;
 			case "dark-obsidian":
 				bodyStyles = "theme-dark";
 				break;
 			case "light-obsidian":
-				bodyStyles = "theme-dark";
+				bodyStyles = "theme-light";
 				break;
-			default:
-				throw new Error("Missing theme");
 		}
 
 		extraStyleSheets.push("app://obsidian.md/app.css");
 
-		// @ts-expect-error
-		const cssTheme = this.app.vault?.getConfig("cssTheme") as string;
-		if (cssTheme) {
-			const fileExists = await this.app.vault.adapter.exists(
-				`.obsidian/themes/${cssTheme}/theme.css`,
-			);
-			if (fileExists) {
-				const themeCss = await this.app.vault.adapter.read(
-					`.obsidian/themes/${cssTheme}/theme.css`,
-				);
-				extraStyles.push(themeCss);
+		const cssTheme = this.getVaultConfig("cssTheme");
+		if (typeof cssTheme === "string" && cssTheme) {
+			const themeCss = await this.readConfigCss("themes", cssTheme, "theme.css");
+			if (themeCss) extraStyles.push(themeCss);
+		}
+
+		const cssSnippets = this.getVaultConfig("enabledCssSnippets");
+		if (Array.isArray(cssSnippets)) {
+			for (const snippet of cssSnippets) {
+				if (typeof snippet !== "string") continue;
+				const snippetCss = await this.readConfigCss("snippets", `${snippet}.css`);
+				if (snippetCss) extraStyles.push(snippetCss);
 			}
 		}
 
-		const cssSnippets =
-			// @ts-expect-error
-			(this.app.vault?.getConfig("enabledCssSnippets") as string[]) ?? [];
-		for (const snippet of cssSnippets) {
-			const fileExists = await this.app.vault.adapter.exists(
-				`.obsidian/snippets/${snippet}.css`,
-			);
-			if (fileExists) {
-				const themeCss = await this.app.vault.adapter.read(
-					`.obsidian/snippets/${snippet}.css`,
-				);
-				extraStyles.push(themeCss);
-			}
-		}
-
-		return {
-			extraStyleSheets,
-			extraStyles,
-			mermaidConfig: (
-				(await loadMermaid()) as Mermaid
-			).mermaidAPI.getConfig(),
-			bodyStyles,
+		const mermaid = (await loadMermaid()) as ObsidianMermaid;
+		const mermaidConfig: MermaidConfig = {
+			...mermaid.mermaidAPI.getConfig(),
+			theme: bodyStyles.split(/\s+/).includes("theme-dark") ? "dark" : "default",
 		};
+		// Recompute colors for the selected theme instead of reusing Obsidian's
+		// previously derived colors, which can leave dark arrows on a dark image.
+		delete mermaidConfig.themeVariables;
+		return { extraStyleSheets, extraStyles, mermaidConfig, bodyStyles };
 	}
 
-	async doPublish(publishFilter?: string): Promise<UploadResults> {
-		const adrFiles = await this.publisher.publish(publishFilter);
-
-		const returnVal: UploadResults = {
-			errorMessage: null,
-			failedFiles: [],
-			filesUploadResult: [],
-		};
-
-		adrFiles.forEach((element) => {
-			if (element.successfulUploadResult) {
-				returnVal.filesUploadResult.push(
-					element.successfulUploadResult,
-				);
-				return;
-			}
-
-			returnVal.failedFiles.push({
-				fileName: element.node.file.absoluteFilePath,
-				reason: element.reason ?? "No Reason Provided",
-			});
-		});
-
-		return returnVal;
+	private getVaultConfig(key: string): unknown {
+		return (this.app.vault as VaultWithConfig).getConfig?.(key);
 	}
 
-	override async onload() {
-		await this.init();
-
-		this.addRibbonIcon("cloud", "Publish to Confluence", async () => {
-			if (this.isSyncing) {
-				new Notice("Syncing already on going");
-				return;
-			}
-			this.isSyncing = true;
-			try {
-				const stats = await this.doPublish();
-				new CompletedModal(this.app, {
-					uploadResults: stats,
-				}).open();
-			} catch (error) {
-				if (error instanceof Error) {
-					new CompletedModal(this.app, {
-						uploadResults: {
-							errorMessage: error.message,
-							failedFiles: [],
-							filesUploadResult: [],
-						},
-					}).open();
-				} else {
-					new CompletedModal(this.app, {
-						uploadResults: {
-							errorMessage: JSON.stringify(error),
-							failedFiles: [],
-							filesUploadResult: [],
-						},
-					}).open();
-				}
-			} finally {
-				this.isSyncing = false;
-			}
-		});
-
-		this.addCommand({
-			id: "adf-to-markdown",
-			name: "ADF To Markdown",
-			callback: async () => {
-				console.log("HMMMM");
-				const json = JSON.parse(
-					'{"type":"doc","content":[{"type":"paragraph","content":[{"text":"Testing","type":"text"}]}],"version":1}',
-				);
-				console.log({ json });
-
-				const confluenceClient = new ObsidianConfluenceClient({
-					host: this.settings.confluenceBaseUrl,
-					authentication: {
-						basic: {
-							email: this.settings.atlassianUserName,
-							apiToken: this.settings.atlassianApiToken,
-						},
-					},
-				});
-				const testingPage =
-					await confluenceClient.content.getContentById({
-						id: "9732097",
-						expand: ["body.atlas_doc_format", "space"],
-					});
-				const adf = JSON.parse(
-					testingPage.body?.atlas_doc_format?.value ||
-						'{type: "doc", content:[]}',
-				);
-				renderADFDoc(adf);
-			},
-		});
-
-		this.addCommand({
-			id: "publish-current",
-			name: "Publish Current File to Confluence",
-			checkCallback: (checking: boolean) => {
-				if (!this.isSyncing) {
-					if (!checking) {
-						this.isSyncing = true;
-						this.doPublish(this.activeLeafPath(this.workspace))
-							.then((stats) => {
-								new CompletedModal(this.app, {
-									uploadResults: stats,
-								}).open();
-							})
-							.catch((error) => {
-								if (error instanceof Error) {
-									new CompletedModal(this.app, {
-										uploadResults: {
-											errorMessage: error.message,
-											failedFiles: [],
-											filesUploadResult: [],
-										},
-									}).open();
-								} else {
-									new CompletedModal(this.app, {
-										uploadResults: {
-											errorMessage: JSON.stringify(error),
-											failedFiles: [],
-											filesUploadResult: [],
-										},
-									}).open();
-								}
-							})
-							.finally(() => {
-								this.isSyncing = false;
-							});
-					}
-					return true;
-				}
-				return true;
-			},
-		});
-
-		this.addCommand({
-			id: "publish-all",
-			name: "Publish All to Confluence",
-			checkCallback: (checking: boolean) => {
-				if (!this.isSyncing) {
-					if (!checking) {
-						this.isSyncing = true;
-						this.doPublish()
-							.then((stats) => {
-								new CompletedModal(this.app, {
-									uploadResults: stats,
-								}).open();
-							})
-							.catch((error) => {
-								if (error instanceof Error) {
-									new CompletedModal(this.app, {
-										uploadResults: {
-											errorMessage: error.message,
-											failedFiles: [],
-											filesUploadResult: [],
-										},
-									}).open();
-								} else {
-									new CompletedModal(this.app, {
-										uploadResults: {
-											errorMessage: JSON.stringify(error),
-											failedFiles: [],
-											filesUploadResult: [],
-										},
-									}).open();
-								}
-							})
-							.finally(() => {
-								this.isSyncing = false;
-							});
-					}
-				}
-				return true;
-			},
-		});
-
-		this.addCommand({
-			id: "enable-publishing",
-			name: "Enable publishing to Confluence",
-			editorCheckCallback: (checking, _editor, view) => {
-				if (!view.file) {
-					return false;
-				}
-
-				if (checking) {
-					const frontMatter = this.app.metadataCache.getCache(
-						view.file.path,
-					)?.frontmatter;
-					const file = view.file;
-					const enabledForPublishing =
-						(file.path.startsWith(this.settings.folderToPublish) &&
-							(!frontMatter ||
-								frontMatter["connie-publish"] !== false)) ||
-						(frontMatter && frontMatter["connie-publish"] === true);
-					return !enabledForPublishing;
-				}
-
-				this.app.fileManager.processFrontMatter(
-					view.file,
-					(frontmatter) => {
-						if (
-							view.file &&
-							view.file.path.startsWith(
-								this.settings.folderToPublish,
-							)
-						) {
-							delete frontmatter["connie-publish"];
-						} else {
-							frontmatter["connie-publish"] = true;
-						}
-					},
-				);
-				return true;
-			},
-		});
-
-		this.addCommand({
-			id: "disable-publishing",
-			name: "Disable publishing to Confluence",
-			editorCheckCallback: (checking, _editor, view) => {
-				if (!view.file) {
-					return false;
-				}
-
-				if (checking) {
-					const frontMatter = this.app.metadataCache.getCache(
-						view.file.path,
-					)?.frontmatter;
-					const file = view.file;
-					const enabledForPublishing =
-						(file.path.startsWith(this.settings.folderToPublish) &&
-							(!frontMatter ||
-								frontMatter["connie-publish"] !== false)) ||
-						(frontMatter && frontMatter["connie-publish"] === true);
-					return enabledForPublishing;
-				}
-
-				this.app.fileManager.processFrontMatter(
-					view.file,
-					(frontmatter) => {
-						if (
-							view.file &&
-							view.file.path.startsWith(
-								this.settings.folderToPublish,
-							)
-						) {
-							frontmatter["connie-publish"] = false;
-						} else {
-							delete frontmatter["connie-publish"];
-						}
-					},
-				);
-				return true;
-			},
-		});
-
-		this.addCommand({
-			id: "page-settings",
-			name: "Update Confluence Page Settings",
-			editorCallback: (_editor, view) => {
-				if (!view.file) {
-					return false;
-				}
-
-				const frontMatter = this.app.metadataCache.getCache(
-					view.file.path,
-				)?.frontmatter;
-
-				const file = view.file;
-
-				new ConfluencePerPageForm(this.app, {
-					config: ConfluencePageConfig.conniePerPageConfig,
-					initialValues:
-						mapFrontmatterToConfluencePerPageUIValues(frontMatter),
-					onSubmit: (values, close) => {
-						const valuesToSet: Partial<ConfluencePageConfig.ConfluencePerPageAllValues> =
-							{};
-						for (const propertyKey in values) {
-							if (
-								Object.prototype.hasOwnProperty.call(
-									values,
-									propertyKey,
-								)
-							) {
-								const element =
-									values[
-										propertyKey as keyof ConfluencePerPageUIValues
-									];
-								if (element.isSet) {
-									valuesToSet[
-										propertyKey as keyof ConfluencePerPageUIValues
-									] = element.value as never;
-								}
-							}
-						}
-						this.adaptor.updateMarkdownValues(
-							file.path,
-							valuesToSet,
-						);
-						close();
-					},
-				}).open();
-				return true;
-			},
-		});
-
-		this.addSettingTab(new ConfluenceSettingTab(this.app, this));
+	/**
+	 * Read a CSS file from the config directory. The Vault API does not index the config
+	 * directory, so the adapter is required here. Names come from app config, so any
+	 * segment that could leave the config directory is rejected.
+	 */
+	private async readConfigCss(...segments: string[]): Promise<string | undefined> {
+		if (segments.some((segment) => !segment || segment === ".." || /[\\/]/.test(segment)))
+			return undefined;
+		const path = normalizePath([this.app.vault.configDir, ...segments].join("/"));
+		if (!(await this.app.vault.adapter.exists(path))) return undefined;
+		return this.app.vault.adapter.read(path);
 	}
 
-	override async onunload() {}
-
-	async loadSettings() {
-		this.settings = Object.assign(
-			{},
-			ConfluenceUploadSettings.DEFAULT_SETTINGS,
-			{ mermaidTheme: "match-obsidian" },
-			await this.loadData(),
+	private runObsidianEffect<A, E>(
+		effect: Effect.Effect<A, E, MarkdownConfluencePlatform | MarkdownWorkspaceService>,
+	): Promise<A> {
+		return Effect.runPromise(
+			effect.pipe(
+				Effect.provide(MarkdownWorkspaceLive),
+				Effect.provideService(
+					MarkdownSourceTransformerService,
+					createDataviewTransformer(this.app, this.settings),
+				),
+				Effect.provide(this.settingsLayer),
+				Effect.provide(this.platform),
+				Effect.mapError(toError),
+			),
 		);
 	}
 
-	async saveSettings() {
-		await this.saveData(this.settings);
-		await this.init();
+	private showPublishResults(uploadResults: UploadResults) {
+		if (this.settings.showPublishResultsModal) {
+			new CompletedModal(this.app, { uploadResults }).open();
+			return;
+		}
+		new Notice(getPublishResultsMessage(uploadResults), 10000);
 	}
+}
+
+function toError(error: unknown): Error {
+	if (error instanceof Error) return error;
+	return new Error(typeof error === "string" ? error : JSON.stringify(error));
+}
+
+function getPublishResultsMessage(uploadResults: UploadResults): string {
+	if (uploadResults.errorMessage) {
+		return `Confluence publish failed: ${uploadResults.errorMessage}`;
+	}
+	if (uploadResults.failedFiles.length > 0) {
+		return `Confluence publish finished: ${uploadResults.filesUploadResult.length} succeeded, ${uploadResults.failedFiles.length} failed.`;
+	}
+	return `Confluence publish finished: ${uploadResults.filesUploadResult.length} file(s) processed.`;
 }
