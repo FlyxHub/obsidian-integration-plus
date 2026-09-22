@@ -343,15 +343,17 @@ A release is a GitHub release whose tag matches the version in `manifest.json` e
    git pull
    ```
 
-1. Update the version number:
+1. Confirm the version. Each feature branch sets the next version when it starts, so `manifest.json` already has the version that you're releasing. The major version stays at 1: major feature updates and breaking changes, such as raising `minAppVersion`, increase the second number (`1.2.0`), and minor updates and fixes increase the third (`1.2.1`).
+
+1. In `CHANGELOG.md`, replace `(unreleased)` in the version's heading with today's date, and commit the change.
+
+1. Tag the release commit:
 
    ```bash
-   npm version RELEASE_TYPE
+   git tag -a VERSION -m VERSION
    ```
 
-   Replace `RELEASE_TYPE` with `patch`, `minor`, or `major`. Use `major` for changes that break existing settings or behavior, such as raising `minAppVersion`.
-
-   This command updates `package.json`, runs `version-bump.mjs` to copy the version into `manifest.json` and add it to `versions.json`, commits the changes, and creates a Git tag such as `7.1.0`.
+   Replace `VERSION` with the version in `manifest.json`, such as `1.2.0`. The tag has no `v` prefix.
 
 1. Build the production files:
 
@@ -367,7 +369,7 @@ A release is a GitHub release whose tag matches the version in `manifest.json` e
 
 1. On GitHub, create the release:
    1. Go to the repository's **Releases** page, and then click **Draft a new release**.
-   1. In **Choose a tag**, select the tag that `npm version` created.
+   1. In **Choose a tag**, select the tag that you created.
    1. Set the release title to the version number.
    1. In the description, summarize the changes. If the release raises `minAppVersion`, or changes settings or credential storage, say so.
    1. Attach `main.js`, `manifest.json`, and `styles.css` as binary files.
@@ -379,7 +381,7 @@ A release is a GitHub release whose tag matches the version in `manifest.json` e
    gh release create VERSION main.js manifest.json styles.css --title VERSION --notes "RELEASE_NOTES"
    ```
 
-   Replace `VERSION` with the new version, such as `7.1.0`, and `RELEASE_NOTES` with a summary of the changes.
+   Replace `VERSION` with the new version, such as `1.2.0`, and `RELEASE_NOTES` with a summary of the changes.
 
 1. Install the release in a clean test vault by following [Install the plugin](#install-the-plugin), and verify that it loads.
 
