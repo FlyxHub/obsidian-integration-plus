@@ -45,6 +45,7 @@ export function publishSettingsKey(settings: ObsidianPluginSettings): string {
 		settings.jiraUrl ?? "",
 		settings.lockPublishedPages ?? false,
 		settings.renderDataview,
+		settings.maxImageWidth,
 		settings.mermaidTheme,
 		settings.mermaid ?? null,
 		settings.kroki ?? null,

@@ -36,6 +36,8 @@ import { desktopFetch } from "./desktopFetch";
 import { ObsidianPlatformLive } from "./effects/ObsidianPlatform";
 import { errorMessage, toError } from "./errors";
 import { PUBLISH_KEY } from "./frontmatterKeys";
+import { sizeImageEmbeds, type ImageSizeLookup } from "./imageEmbeds";
+import { imageSize } from "./imageSize";
 import { krokiFetch } from "./KrokiFetch";
 import { loadMermaidStyles, type MermaidStyles } from "./mermaidStyles";
 import { createObsidianConfluenceClient } from "./ObsidianAuthentication";
@@ -623,12 +625,38 @@ export default class ConfluencePlugin extends Plugin {
 		);
 	}
 
-	/** Publish-time Markdown changes: Dataview results, then callouts shaped for panels. */
+	/**
+	 * Publish-time Markdown changes: Dataview results, callouts shaped for panels, and image
+	 * embeds with explicit sizes. None of them change the note.
+	 */
 	private sourceTransformer(): MarkdownSourceTransformer {
 		const dataview = createDataviewTransformer(this.app, this.settings);
+		const maxImageWidth = this.settings.maxImageWidth;
 		return {
 			transform: (markdown, context) =>
-				dataview.transform(markdown, context).pipe(Effect.map(normalizeCalloutsForPublish)),
+				dataview.transform(markdown, context).pipe(
+					Effect.map(normalizeCalloutsForPublish),
+					Effect.flatMap((text) =>
+						Effect.tryPromise({
+							try: () =>
+								sizeImageEmbeds(
+									text,
+									this.imageSizeLookup(toVaultPath(context.absoluteFilePath)),
+									maxImageWidth,
+								),
+							catch: toError,
+						}),
+					),
+				),
+		};
+	}
+
+	/** Reads the size of images that a note embeds, resolving links as Obsidian does. */
+	private imageSizeLookup(sourcePath: string): ImageSizeLookup {
+		return async (link) => {
+			const file = this.app.metadataCache.getFirstLinkpathDest(link, sourcePath);
+			if (!file) return undefined;
+			return imageSize(new Uint8Array(await this.app.vault.readBinary(file)));
 		};
 	}
 
