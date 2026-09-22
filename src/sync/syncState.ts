@@ -13,6 +13,11 @@ export interface SyncBase {
 	unresolvedLinks: string[];
 	/** Media file IDs with no local copy, so they stayed `adf` fences. */
 	unresolvedMedia: string[];
+	/**
+	 * The note's fingerprint when it was last in sync with this page, or undefined when it
+	 * has local changes that aren't published yet. See `fingerprint.ts`.
+	 */
+	localFingerprint?: string | undefined;
 }
 
 export interface SyncStateStore {
@@ -59,10 +64,8 @@ export function createSyncStateStore(adapter: DataAdapter, directory: string): S
 
 function parseBase(value: unknown, pageId: string): SyncBase | undefined {
 	if (!value || typeof value !== "object") return undefined;
-	const { version, title, markdown, format, unresolvedLinks, unresolvedMedia } = value as Record<
-		string,
-		unknown
-	>;
+	const { version, title, markdown, format, unresolvedLinks, unresolvedMedia, localFingerprint } =
+		value as Record<string, unknown>;
 	if (typeof version !== "number" || typeof title !== "string" || typeof markdown !== "string")
 		return undefined;
 	return {
@@ -73,6 +76,7 @@ function parseBase(value: unknown, pageId: string): SyncBase | undefined {
 		format: typeof format === "number" ? format : 1,
 		unresolvedLinks: stringsOf(unresolvedLinks),
 		unresolvedMedia: stringsOf(unresolvedMedia),
+		localFingerprint: typeof localFingerprint === "string" ? localFingerprint : undefined,
 	};
 }
 
