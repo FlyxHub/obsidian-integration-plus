@@ -42,7 +42,7 @@ Keep version numbers current with every change. The version lives in `package.js
 
 ## Documentation
 
-Write user-facing docs, such as `README.md`, in the style of the [Google developer documentation style guide](https://developers.google.com/style): second person, present tense, active voice, sentence-case headings, serial commas, numbered steps for procedures, and `PLACEHOLDER` names that the text explains. The README includes the testing and release guides; update them when scripts, the release process, or anything in the Disclosures section changes.
+Write user-facing docs, such as `README.md`, in the style of the [Google developer documentation style guide](https://developers.google.com/style): second person, present tense, active voice, sentence-case headings, serial commas, numbered steps for procedures, and `PLACEHOLDER` names that the text explains. The README is for users only: installing, setting up, and using the plugin, plus the Disclosures section, which must stay accurate. Developer setup, the test plan, and the release guide live in `CONTRIBUTING.md`; update it when scripts or the release process change.
 
 ## Architecture
 
