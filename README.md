@@ -38,24 +38,120 @@ If you used the original Confluence Integration plugin in this vault, this plugi
 
 ## Connect to Confluence
 
+To connect, choose an authentication method, set it up, and then tell the plugin where to publish.
+
 ### Before you begin
 
-- Find the ID of the Confluence page that you want to publish notes under. The ID is the number after `/pages/` in the page URL. For example, the ID in `https://example.atlassian.net/wiki/spaces/DOCS/pages/123456/Home` is `123456`.
-- Get credentials for one of the supported authentication types:
-  - **API token (basic):** your Atlassian email address and an [Atlassian API token](https://id.atlassian.com/manage-profile/security/api-tokens).
-  - **Bearer token or PAT:** a bearer token.
-  - **OAuth service account:** a client ID and client secret from Atlassian Administration.
-  - **OAuth browser sign-in:** the client ID of an OAuth app that you registered with Atlassian.
+Find the ID of the Confluence page that you want to publish notes under. The ID is the number after `/pages/` in the page URL. For example, the ID in `https://example.atlassian.net/wiki/spaces/DOCS/pages/123456/Home` is `123456`.
 
-### Configure the plugin
+### Choose an authentication method
 
-1. Go to **Settings** > **Confluence Integration Plus**.
-1. In the **Authentication type** list, select your authentication type.
+The plugin supports four authentication methods:
+
+| Method                                                      | Use it when                                                                                        | What you need                                                      |
+| ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| [API token (basic)](#use-an-api-token)                      | You publish as yourself. This method is the quickest to set up.                                    | Your Atlassian email address and an API token.                     |
+| [Bearer token or PAT](#use-a-bearer-token)                  | You have a token that Confluence accepts as a bearer token, such as a service account's API token. | The token.                                                         |
+| [OAuth service account](#use-an-oauth-service-account)      | Your organization publishes through a service account instead of a person.                         | A client ID and client secret from Atlassian Administration.       |
+| [OAuth browser sign-in](#sign-in-with-oauth-in-the-browser) | You want to sign in with your Atlassian account instead of storing a long-lived token.             | An OAuth app that you register in the Atlassian developer console. |
+
+Some methods need your site's cloud ID. To find it, open `https://SITE.atlassian.net/_edge/tenant_info` in a browser, and replace `SITE` with your site's name. The page shows a `cloudId` value.
+
+The plugin keeps tokens and secrets in Obsidian secret storage, never in `data.json`. When a setting asks for a secret, select an existing secret or create one, and then paste the value into it.
+
+### Confluence scopes
+
+If your token or app asks you to choose scopes, give it the following Confluence scopes:
+
+- `read:page:confluence` and `write:page:confluence`
+- `read:attachment:confluence` and `write:attachment:confluence`
+- `read:label:confluence` and `write:label:confluence`
+- `read:content.restriction:confluence` and `write:content.restriction:confluence`
+- `read:space:confluence`
+- `read:content.metadata:confluence`
+- `read:content-details:confluence`
+- `read:confluence-user`
+
+### Use an API token
+
+1. Go to [API tokens](https://id.atlassian.com/manage-profile/security/api-tokens) in your Atlassian account, and create an API token. If you create a token with scopes, give it the [Confluence scopes](#confluence-scopes).
+1. Copy the token. Atlassian shows it only once.
+1. In Obsidian, go to **Settings** > **Confluence Integration Plus**.
+1. In the **Authentication type** list, select **API token (basic)**.
 1. In **Confluence site URL**, enter the address that you open in a browser, such as `https://example.atlassian.net`.
-1. Leave **Confluence API URL** empty, unless one of the following applies:
-   - If you use a scoped API token or an OAuth service account, enter `https://api.atlassian.com/ex/confluence/CLOUD_ID`. Replace `CLOUD_ID` with your site's cloud ID.
-   - If you sign in with OAuth in the browser, the plugin fills in this setting when you choose your site.
-1. Enter your credentials. For the API token or client secret, select an existing secret or create one in Obsidian secret storage.
+1. In **Confluence API URL**, do one of the following:
+   - If you created a token without scopes, leave the setting empty.
+   - If you created a token with scopes, enter `https://api.atlassian.com/ex/confluence/CLOUD_ID`. Replace `CLOUD_ID` with your site's cloud ID.
+1. In **Atlassian username**, enter the email address of your Atlassian account.
+1. In **Atlassian API token**, select or create a secret that contains the token.
+1. [Finish the setup](#finish-the-setup).
+
+### Use a bearer token
+
+The plugin sends the token in an `Authorization: Bearer` header. Use this method for a service account's API token, or for another token that your site accepts as a bearer token.
+
+1. Get the token. For a service account, go to **Directory** > **Service accounts** in [Atlassian Administration](https://admin.atlassian.com), open the service account, and create an API token with the [Confluence scopes](#confluence-scopes).
+1. In Obsidian, go to **Settings** > **Confluence Integration Plus**.
+1. In the **Authentication type** list, select **Bearer token or PAT**.
+1. In **Confluence site URL**, enter the address that you open in a browser, such as `https://example.atlassian.net`.
+1. In **Confluence API URL**, do one of the following:
+   - For a service account's API token, enter `https://api.atlassian.com/ex/confluence/CLOUD_ID`. Replace `CLOUD_ID` with your site's cloud ID.
+   - For a token that works with your site's own address, leave the setting empty.
+1. In **Atlassian API token**, select or create a secret that contains the token.
+1. [Finish the setup](#finish-the-setup).
+
+### Use an OAuth service account
+
+With this method, the plugin uses the service account's client ID and client secret to request a new access token each time that you publish or pull. Pages that you publish this way are created and edited by the service account.
+
+1. In [Atlassian Administration](https://admin.atlassian.com), go to **Directory** > **Service accounts**, and open or create a service account.
+1. Give the service account access to Confluence, and permission to edit the space that you publish to.
+1. Create an OAuth 2.0 credential for the service account, and give it the [Confluence scopes](#confluence-scopes).
+1. Copy the client ID and client secret. Atlassian shows the secret only once.
+1. In Obsidian, go to **Settings** > **Confluence Integration Plus**.
+1. In the **Authentication type** list, select **OAuth service account**.
+1. In **Confluence site URL**, enter the address that you open in a browser, such as `https://example.atlassian.net`.
+1. In **Confluence API URL**, enter `https://api.atlassian.com/ex/confluence/CLOUD_ID`. Replace `CLOUD_ID` with your site's cloud ID. This method requires this setting.
+1. In **OAuth client ID**, enter the client ID.
+1. In **OAuth client secret**, select or create a secret that contains the client secret.
+1. [Finish the setup](#finish-the-setup).
+
+### Sign in with OAuth in the browser
+
+With this method, you sign in to Atlassian in your browser and choose a site. The plugin keeps the access and refresh tokens in secret storage and renews them for you.
+
+This method needs an OAuth 2.0 (3LO) app that's registered with Atlassian. You register the app once, and then each person signs in with their own Atlassian account.
+
+#### Register an OAuth app
+
+1. Go to the [Atlassian developer console](https://developer.atlassian.com/console/myapps/), and create an OAuth 2.0 integration.
+1. Go to **Permissions**, add the **Confluence API**, and then add the [Confluence scopes](#confluence-scopes). You don't need to add `offline_access`; the plugin requests it when you sign in, so that it can renew your tokens.
+1. Go to **Authorization**, and add OAuth 2.0 (3LO). In **Callback URL**, enter `http://127.0.0.1:8766/callback`. If another program uses port 8766 on your computer, choose a different port, and enter the same URL in the plugin's **Callback URL** setting later.
+1. Go to **Settings**, and copy the client ID and secret.
+
+#### Connect the plugin
+
+1. In Obsidian, go to **Settings** > **Confluence Integration Plus**.
+1. In the **Authentication type** list, select **OAuth browser sign-in**.
+1. In the **Login method** list, select one of the following:
+   - **Browser login:** After you sign in, Atlassian returns you to the plugin through the callback URL. Use this method unless you can't.
+   - **Device code:** You enter a code on an Atlassian page, and the plugin doesn't start a local listener. This method works only if Atlassian enabled the device authorization grant for your app.
+1. In **OAuth client ID**, enter the app's client ID.
+1. In **OAuth client secret**, enter the app's secret. Leave it empty only if Atlassian approved your app as a public client.
+1. If you selected **Browser login**, check that **Callback URL** exactly matches the callback URL that you registered. It must have the form `http://127.0.0.1:PORT/callback`.
+1. Click **Connect to Atlassian**. Your browser opens. Then, do one of the following:
+   - For **Browser login**, sign in, choose your site, and then click **Accept**. When the page says that you can close the tab, return to Obsidian.
+   - For **Device code**, the plugin shows **Your device code**. Click **Copy code**, enter the code on the page that opened, and then approve access.
+1. In the **Confluence site** list, select the site to publish to. The plugin fills in the site and API URLs.
+1. [Finish the setup](#finish-the-setup).
+1. Optional: To check the connection, click **Test connection**. The plugin reads the parent page and shows its title.
+
+To sign out, click **Disconnect**, which removes this vault's tokens. To revoke the plugin's access completely, also remove the app from **Connected apps** in your Atlassian account settings. The app settings are locked while you're connected; to change them, disconnect first.
+
+### Finish the setup
+
+After you set up authentication, do the following on the same settings tab:
+
 1. In **Parent page ID**, enter the page ID that you found earlier.
 1. In **Folder to publish**, enter the vault folder that contains the notes to publish.
 
