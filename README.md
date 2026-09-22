@@ -195,6 +195,7 @@ The plugin skips a page, and says why in the results dialog, in these cases:
 ## Diagrams, equations, and embeds
 
 - **Embeds:** The plugin expands note embeds, such as `![[Shared Notes/Release Checklist]]`, before publishing.
+- **Image size:** Images wider than **Maximum image width** (700 pixels by default) are scaled down to that width in Confluence, close to how Obsidian shows them. To set the width of one image, add it to the embed, such as `![[diagram.png|400]]` or `![Diagram|400](diagram.png)`. The height follows from the image's shape. To set both, use `WIDTHxHEIGHT`, such as `![[diagram.png|400x300]]`. Your notes aren't changed.
 - **Callouts and panels:** Callouts publish as Confluence panels, and pulled panels become callouts. Info, note, warning, and success panels match the callout of the same name, and error panels match `[!failure]`. A callout without a title publishes only its text, because the panel's icon shows its type. A callout with a title publishes the title as the panel's first line. Other callout types publish as info panels or custom panels.
 - **Mermaid and LaTeX:** The plugin renders Mermaid diagrams and LaTeX equations on your computer.
 - **Kroki and PlantUML:** Kroki (`kroki-*` code blocks) and PlantUML (`plantuml`, `puml`, and `uml` code blocks) are off by default. When you turn them on, the plugin sends diagram source to the server that you configure. Use a server that you trust, such as a self-hosted instance.

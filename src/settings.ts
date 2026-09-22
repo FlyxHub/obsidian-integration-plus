@@ -30,6 +30,8 @@ export interface ObsidianPluginSettings
 	importNewPages: boolean;
 	/** Vault folder where pull saves images and other attachments. */
 	imageFolder: string;
+	/** Published images wider than this many pixels are scaled down to it; 0 for no limit. */
+	maxImageWidth: number;
 	mermaidTheme: MermaidTheme;
 	/** Name of the SecretStorage entry that holds the API token or PAT. */
 	apiTokenSecretName: string;
@@ -43,6 +45,7 @@ const PLUGIN_DEFAULTS = {
 	renderDataview: false,
 	importNewPages: true,
 	imageFolder: "images",
+	maxImageWidth: 700,
 	apiTokenSecretName: "",
 	clientSecretSecretName: "",
 	oauthMode: "service-account",

@@ -2,6 +2,14 @@
 
 All notable changes to Confluence Integration Plus are listed here. For the history of the plugin this one was forked from, see the [markdown-confluence changelog](https://github.com/markdown-confluence/markdown-confluence/blob/main/CHANGELOG.md).
 
+## 1.1.1 (unreleased)
+
+### Fixes
+
+- Images no longer fill the whole Confluence page. Images wider than the new **Maximum image width** setting (700 pixels by default) are scaled down to it.
+- An image width set in a note, such as `![[image.png|400]]`, keeps the image's aspect ratio instead of stretching it to its full height.
+- The first **Publish changes** after you update publishes every note once, so existing pages get the new image sizes.
+
 ## 1.1.0 (2026-09-22)
 
 ### Features

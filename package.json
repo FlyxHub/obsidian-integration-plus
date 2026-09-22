@@ -1,6 +1,6 @@
 {
 	"name": "confluence-integration-plus",
-	"version": "1.1.0",
+	"version": "1.1.1",
 	"description": "Publish notes to Atlassian Confluence and pull changes made in Confluence back into your vault.",
 	"private": true,
 	"main": "main.js",

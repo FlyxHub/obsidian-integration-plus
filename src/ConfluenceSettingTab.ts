@@ -269,6 +269,19 @@ export class ConfluenceSettingTab extends PluginSettingTab {
 			(value) => (settings.imageFolder = toVaultFolder(value)),
 			{ placeholder: "images" },
 		);
+		this.addText(
+			containerEl,
+			"Maximum image width",
+			"Published images wider than this many pixels are scaled down to it, close to how Obsidian shows them. To size one image, add a width to its embed, such as ![[image.png|400]]. Enter 0 for no limit.",
+			() => String(settings.maxImageWidth),
+			(value) => {
+				const width = Number(value.trim() || "0");
+				if (!Number.isInteger(width) || width < 0) return false;
+				settings.maxImageWidth = width;
+				return true;
+			},
+			{ placeholder: "700" },
+		);
 	}
 
 	private renderMermaid(containerEl: HTMLElement) {
