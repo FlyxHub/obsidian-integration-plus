@@ -2,6 +2,12 @@
 
 All notable changes to Confluence Integration Plus are listed here. For the history of the plugin this one was forked from, see the [markdown-confluence changelog](https://github.com/markdown-confluence/markdown-confluence/blob/main/CHANGELOG.md).
 
+## 1.1.2 (unreleased)
+
+### Fixes
+
+- Publishing no longer fails with "'/C:\Users\…\Obsidian/' doesn't exist." in vaults whose settings were imported from the original Confluence Integration plugin. The plugin now always publishes notes from the vault root, whatever folder the old settings named.
+
 ## 1.1.1 (2026-09-22)
 
 ### Fixes

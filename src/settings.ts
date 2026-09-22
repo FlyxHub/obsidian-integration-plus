@@ -70,6 +70,9 @@ export function mergeSettings(data: unknown): ObsidianPluginSettings {
 			...ConfluenceUploadSettings.DEFAULT_SETTINGS.plantuml,
 			...loaded.plantuml,
 		},
+		// Notes are read through the vault, so the vault root is always the content root. The
+		// original plugin saved Obsidian's working directory here, which imported settings carry.
+		contentRoot: ConfluenceUploadSettings.DEFAULT_SETTINGS.contentRoot,
 	};
 	if (!isMermaidTheme(settings.mermaidTheme)) settings.mermaidTheme = PLUGIN_DEFAULTS.mermaidTheme;
 	return settings;

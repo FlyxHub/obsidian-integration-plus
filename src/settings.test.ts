@@ -89,6 +89,13 @@ test("keeps nested defaults and rejects unknown Mermaid themes from older data",
 	expect(settings.mermaidTheme).toBe("match-obsidian");
 });
 
+test("always publishes from the vault root, whatever content root older data stored", () => {
+	const settings = mergeSettings({
+		contentRoot: "C:\\Users\\me\\AppData\\Local\\Programs\\Obsidian/",
+	});
+	expect(settings.contentRoot).toBe(".");
+});
+
 test("ignores malformed plugin data", () => {
 	expect(mergeSettings(null).mermaidTheme).toBe("match-obsidian");
 	expect(mergeSettings(["unexpected"]).showPublishResultsModal).toBe(true);
