@@ -1,5 +1,9 @@
 import { createHash, randomBytes } from "node:crypto";
-import type { ConfluenceFetch } from "@markdown-confluence/lib";
+import {
+	ATLASSIAN_OAUTH_AUDIENCE,
+	ATLASSIAN_OAUTH_TOKEN_URL,
+	type ConfluenceFetch,
+} from "@markdown-confluence/lib";
 import { desktopFetch } from "./desktopFetch";
 import { oauthCallbackUrl, receiveOAuthCode } from "./OAuthCallback";
 
@@ -38,7 +42,7 @@ export const confluenceOAuthScopes = [
 	"read:confluence-user",
 ];
 const authOrigin = "https://auth.atlassian.com";
-const tokenUrl = `${authOrigin}/oauth/token`;
+const tokenUrl = ATLASSIAN_OAUTH_TOKEN_URL;
 const random = () => randomBytes(32).toString("base64url");
 const loginExpired = "Login expired. Please start again.";
 class OAuthNetworkError extends Error {}
@@ -181,7 +185,7 @@ export class AtlassianOAuth {
 		const verifier = random();
 		const authorization = new URL(`${authOrigin}/authorize`);
 		authorization.search = new URLSearchParams({
-			audience: "api.atlassian.com",
+			audience: ATLASSIAN_OAUTH_AUDIENCE,
 			client_id: credentials.clientId,
 			scope: confluenceOAuthScopes.join(" "),
 			redirect_uri: callbackUrl,
@@ -215,7 +219,7 @@ export class AtlassianOAuth {
 				headers: { "Content-Type": "application/x-www-form-urlencoded" },
 				body: new URLSearchParams({
 					...this.credentials(credentials),
-					audience: "api.atlassian.com",
+					audience: ATLASSIAN_OAUTH_AUDIENCE,
 					scope: confluenceOAuthScopes.join(" "),
 				}).toString(),
 			},

@@ -1,7 +1,8 @@
+import { createFenceTracker } from "./fences";
+
 /** `> [!type]` with no title, collapse marker, or text after it. */
 const CALLOUT_WITHOUT_TITLE = /^(\s*>\s*)\[!([^\]]+)\]\s*$/;
 const QUOTED_LINE = /^\s*>\s?(.*)$/;
-const FENCE = /^\s*(`{3,}|~{3,})/;
 const NOT_PARAGRAPH = /^(#{1,6}\s|[-*+]\s|\d+[.)]\s|>|`{3,}|~{3,}|\||<|\[!)/;
 const THEMATIC_BREAK = /^(-{3,}|\*{3,}|_{3,})$/;
 
@@ -19,18 +20,10 @@ const THEMATIC_BREAK = /^(-{3,}|\*{3,}|_{3,})$/;
 export function normalizeCalloutsForPublish(markdown: string): string {
 	const lines = markdown.split("\n");
 	const output: string[] = [];
-	let fence: string | undefined;
+	const inCode = createFenceTracker();
 	for (let index = 0; index < lines.length; index++) {
 		const line = lines[index]!;
-		const fenceMatch = FENCE.exec(line);
-		if (fenceMatch) {
-			const marker = fenceMatch[1]!;
-			if (!fence) fence = marker;
-			else if (marker[0] === fence[0] && marker.length >= fence.length) fence = undefined;
-			output.push(line);
-			continue;
-		}
-		const callout = fence ? null : CALLOUT_WITHOUT_TITLE.exec(line);
+		const callout = inCode(line) ? null : CALLOUT_WITHOUT_TITLE.exec(line);
 		const next = lines[index + 1];
 		const firstBodyLine = callout && next !== undefined ? QUOTED_LINE.exec(next)?.[1] : undefined;
 		if (callout && firstBodyLine !== undefined && isParagraphText(firstBodyLine)) {

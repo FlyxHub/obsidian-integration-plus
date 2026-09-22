@@ -3,7 +3,7 @@ import { createRoot, Root } from "react-dom/client";
 import { StrictMode, useState } from "react";
 import { UploadAdfFileResult } from "@markdown-confluence/lib";
 
-export interface FailedFile {
+interface FailedFile {
 	fileName: string;
 	reason: string;
 }
@@ -14,7 +14,7 @@ export interface UploadResults {
 	filesUploadResult: UploadAdfFileResult[];
 }
 
-export interface UploadResultsProps {
+interface UploadResultsProps {
 	uploadResults: UploadResults;
 }
 
@@ -24,13 +24,26 @@ function safePageUrl(url: string | undefined): string | undefined {
 	return new URL(url).protocol === "https:" ? url : undefined;
 }
 
-const UpdatedFiles = ({
-	results,
-	type,
-}: {
-	results: UploadAdfFileResult[];
-	type: "content" | "image" | "label";
-}) => (
+/** The parts of a page the publisher reports on, with their labels in the results. */
+const RESULT_TYPES = [
+	{ type: "content", label: "Content" },
+	{ type: "image", label: "Images" },
+	{ type: "label", label: "Labels" },
+] as const;
+
+type ResultType = (typeof RESULT_TYPES)[number]["type"];
+
+const FailedList = ({ files }: { files: FailedFile[] }) => (
+	<ul>
+		{files.map((file) => (
+			<li key={file.fileName}>
+				<strong>{file.fileName}</strong>: {file.reason}
+			</li>
+		))}
+	</ul>
+);
+
+const UpdatedFiles = ({ results, type }: { results: UploadAdfFileResult[]; type: ResultType }) => (
 	<ul>
 		{results
 			.filter((result) => result[`${type}Result`] === "updated")
@@ -50,29 +63,13 @@ const CompletedView = ({ uploadResults }: UploadResultsProps) => {
 		return (
 			<div className="confluence-results">
 				<p className="confluence-error">{errorMessage}</p>
-				{failedFiles.length > 0 && (
-					<ul>
-						{failedFiles.map((file) => (
-							<li key={file.fileName}>
-								<strong>{file.fileName}</strong>: {file.reason}
-							</li>
-						))}
-					</ul>
-				)}
+				{failedFiles.length > 0 && <FailedList files={failedFiles} />}
 			</div>
 		);
 	}
 
-	const countResults = {
-		content: { same: 0, updated: 0 },
-		images: { same: 0, updated: 0 },
-		labels: { same: 0, updated: 0 },
-	};
-	for (const result of filesUploadResult) {
-		countResults.content[result.contentResult]++;
-		countResults.images[result.imageResult]++;
-		countResults.labels[result.labelResult]++;
-	}
+	const count = (type: ResultType, outcome: "same" | "updated") =>
+		filesUploadResult.filter((result) => result[`${type}Result`] === outcome).length;
 
 	return (
 		<div className="confluence-results">
@@ -81,13 +78,7 @@ const CompletedView = ({ uploadResults }: UploadResultsProps) => {
 			{failedFiles.length > 0 && (
 				<div className="confluence-failed">
 					<p>{failedFiles.length} file(s) failed to publish:</p>
-					<ul>
-						{failedFiles.map((file) => (
-							<li key={file.fileName}>
-								<strong>{file.fileName}</strong>: {file.reason}
-							</li>
-						))}
-					</ul>
+					<FailedList files={failedFiles} />
 				</div>
 			)}
 
@@ -100,21 +91,13 @@ const CompletedView = ({ uploadResults }: UploadResultsProps) => {
 					</tr>
 				</thead>
 				<tbody>
-					<tr>
-						<td>Content</td>
-						<td>{countResults.content.same}</td>
-						<td>{countResults.content.updated}</td>
-					</tr>
-					<tr>
-						<td>Images</td>
-						<td>{countResults.images.same}</td>
-						<td>{countResults.images.updated}</td>
-					</tr>
-					<tr>
-						<td>Labels</td>
-						<td>{countResults.labels.same}</td>
-						<td>{countResults.labels.updated}</td>
-					</tr>
+					{RESULT_TYPES.map(({ type, label }) => (
+						<tr key={type}>
+							<td>{label}</td>
+							<td>{count(type, "same")}</td>
+							<td>{count(type, "updated")}</td>
+						</tr>
+					))}
 				</tbody>
 			</table>
 
@@ -123,12 +106,12 @@ const CompletedView = ({ uploadResults }: UploadResultsProps) => {
 			</button>
 			{expanded && (
 				<div className="confluence-updated-files">
-					<h4>Updated content</h4>
-					<UpdatedFiles results={filesUploadResult} type="content" />
-					<h4>Updated images</h4>
-					<UpdatedFiles results={filesUploadResult} type="image" />
-					<h4>Updated labels</h4>
-					<UpdatedFiles results={filesUploadResult} type="label" />
+					{RESULT_TYPES.map(({ type, label }) => (
+						<div key={type}>
+							<h4>Updated {label.toLowerCase()}</h4>
+							<UpdatedFiles results={filesUploadResult} type={type} />
+						</div>
+					))}
 				</div>
 			)}
 		</div>

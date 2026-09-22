@@ -1,3 +1,6 @@
+import { errorMessage } from "../errors";
+import { PAGE_ID_KEY, PAGE_TITLE_KEY } from "../frontmatterKeys";
+import { baseName, parentOf } from "../paths";
 import { MERGE_FORMAT, adfToMergeMarkdown } from "./adfMarkdown";
 import type { ConfluenceRemote, RemoteChild, RemotePage } from "./confluenceRemote";
 import { mediaReferences, type MediaResolver, type MediaSync } from "./media";
@@ -5,8 +8,6 @@ import { hasConflictMarkers, mergeThreeWay, mergeTwoWay, splitFrontmatter } from
 import { createPageLinkResolver, rewritePageLinks, type PageLinkResolver } from "./pageLinks";
 import { toNoteName } from "./names";
 import type { SyncStateStore } from "./syncState";
-
-export { toNoteName };
 
 /** Vault operations pull needs; implemented with the Obsidian API in main.ts. */
 export interface PullVault {
@@ -24,10 +25,13 @@ export interface PullVault {
 	create(path: string, body: string, frontmatter: Record<string, string>): Promise<void>;
 }
 
-export interface PullOptions {
+export interface SiteUrls {
 	confluenceBaseUrl: string;
 	/** The browser address of the site, which page links in Confluence content point to. */
 	confluenceSiteUrl: string;
+}
+
+export interface PullOptions extends SiteUrls {
 	/** Pull only these page IDs; all linked notes when undefined. */
 	pageIds?: readonly string[];
 	/** Import pages under this root page that have no note yet. */
@@ -46,6 +50,13 @@ export interface PullReport {
 	unchanged: number;
 }
 
+/** A page the publisher just uploaded. */
+export interface PublishedPage {
+	pageId: string;
+	/** The publish left the page content as it was. */
+	unchanged: boolean;
+}
+
 export interface ConvertedPage {
 	markdown: string;
 	/** Linked page IDs that have no note yet. */
@@ -62,7 +73,7 @@ export interface ConvertedPage {
  */
 export function convertPage(
 	adf: unknown,
-	urls: { confluenceBaseUrl: string; confluenceSiteUrl: string },
+	urls: SiteUrls,
 	resolve: PageLinkResolver,
 	media: MediaResolver = () => undefined,
 ): ConvertedPage {
@@ -133,7 +144,7 @@ export class PullService {
 			try {
 				await this.pullNote(pageId, path, versions.get(pageId)?.version, options, resolve, report);
 			} catch (error) {
-				report.skipped.push({ name: path, reason: messageOf(error) });
+				report.skipped.push({ name: path, reason: errorMessage(error) });
 			}
 		}
 
@@ -141,15 +152,41 @@ export class PullService {
 			options.signal?.throwIfAborted();
 			options.onProgress?.(`Importing ${path}`);
 			try {
-				const converted = await this.convert(page, path, options, resolve, report);
+				const converted = await this.convertForPull(page, path, options, resolve, report);
 				await this.vault.create(path, converted.markdown, frontmatter);
 				await this.recordBase(page, converted);
 				report.imported.push(path);
 			} catch (error) {
-				report.skipped.push({ name: page.title, reason: messageOf(error) });
+				report.skipped.push({ name: page.title, reason: errorMessage(error) });
 			}
 		}
 		return report;
+	}
+
+	/**
+	 * After a publish, record what Confluence now holds as the base for the next pull. Nothing
+	 * is downloaded: images uploaded from this vault are matched by name. Returns the pages
+	 * whose base couldn't be saved.
+	 */
+	async recordPublished(
+		pages: readonly PublishedPage[],
+		urls: SiteUrls,
+	): Promise<{ pageId: string; reason: string }[]> {
+		const resolve = createPageLinkResolver(this.vault.linkedNotes(), this.vault.notePaths());
+		const failures: { pageId: string; reason: string }[] = [];
+		for (const { pageId, unchanged } of pages) {
+			try {
+				const existing = await this.state.get(pageId);
+				if (unchanged && existing?.format === MERGE_FORMAT) continue;
+				const page = await this.remote.getPage(pageId);
+				if (!page) continue;
+				const { converted } = await this.convert(page, urls, resolve, false);
+				await this.recordBase(page, converted);
+			} catch (error) {
+				failures.push({ pageId, reason: errorMessage(error) });
+			}
+		}
+		return failures;
 	}
 
 	private async pullNote(
@@ -189,7 +226,7 @@ export class PullService {
 			return;
 		}
 
-		const remote = await this.convert(page, path, options, resolve, report);
+		const remote = await this.convertForPull(page, path, options, resolve, report);
 		const { frontmatter, body } = splitFrontmatter(local);
 		let merged;
 		if (base) {
@@ -206,7 +243,7 @@ export class PullService {
 
 		if (merged.text !== body) await this.vault.replace(path, local, frontmatter + merged.text);
 		if (base && page.title !== base.title) {
-			await this.vault.setFrontmatter(path, { "connie-title": page.title });
+			await this.vault.setFrontmatter(path, { [PAGE_TITLE_KEY]: page.title });
 			report.renamed.push({ path, title: page.title });
 		}
 		await this.recordBase(page, remote);
@@ -251,7 +288,7 @@ export class PullService {
 					if (depth < MAX_DEPTH)
 						queue.push({ children: next.children, folder: next.folder, depth: depth + 1 });
 				} catch (error) {
-					report.skipped.push({ name: child.title, reason: messageOf(error) });
+					report.skipped.push({ name: child.title, reason: errorMessage(error) });
 				}
 			}
 		}
@@ -296,12 +333,12 @@ export class PullService {
 		if (this.vault.exists(path) || plannedPaths.has(path)) {
 			report.skipped.push({
 				name: page.title,
-				reason: `A note already exists at ${path}. Add connie-page-id: ${page.id} to it to link it.`,
+				reason: `A note already exists at ${path}. Add ${PAGE_ID_KEY}: ${page.id} to it to link it.`,
 			});
 			return undefined;
 		}
-		const frontmatter: Record<string, string> = { "connie-page-id": page.id };
-		if (name !== page.title) frontmatter["connie-title"] = page.title;
+		const frontmatter: Record<string, string> = { [PAGE_ID_KEY]: page.id };
+		if (name !== page.title) frontmatter[PAGE_TITLE_KEY] = page.title;
 		pathsById.set(page.id, path);
 		plannedPaths.add(path);
 		return {
@@ -311,19 +348,30 @@ export class PullService {
 		};
 	}
 
-	/** Download the page's images, then convert it. Image failures are reported, not thrown. */
+	/** Make the page's images local, then convert it. Image failures are returned, not thrown. */
 	private async convert(
 		page: RemotePage,
+		urls: SiteUrls,
+		resolve: PageLinkResolver,
+		download: boolean,
+	): Promise<{ converted: ConvertedPage; imageErrors: string[] }> {
+		const imageErrors = this.media ? await this.media.ensure(page.adf, { download }) : [];
+		const converted = convertPage(page.adf, urls, resolve, this.media?.resolver());
+		return { converted, imageErrors };
+	}
+
+	/** Convert with image downloads, reporting images that failed against the note. */
+	private async convertForPull(
+		page: RemotePage,
 		path: string,
-		options: PullOptions,
+		urls: SiteUrls,
 		resolve: PageLinkResolver,
 		report: PullReport,
 	): Promise<ConvertedPage> {
-		if (!this.media) return convertPage(page.adf, options, resolve);
-		const errors = await this.media.ensure(page.adf, { download: true });
-		for (const error of errors)
+		const { converted, imageErrors } = await this.convert(page, urls, resolve, true);
+		for (const error of imageErrors)
 			report.skipped.push({ name: path, reason: `An image wasn't downloaded: ${error}` });
-		return convertPage(page.adf, options, resolve, this.media.resolver());
+		return converted;
 	}
 
 	private async recordBase(page: RemotePage, converted: ConvertedPage) {
@@ -376,17 +424,4 @@ export function isGeneratedFolderPage(adf: unknown): boolean {
 
 function joinPath(folder: string, name: string): string {
 	return folder ? `${folder}/${name}` : name;
-}
-
-function parentOf(path: string): string {
-	const index = path.lastIndexOf("/");
-	return index === -1 ? "" : path.slice(0, index);
-}
-
-function baseName(path: string): string {
-	return path.slice(path.lastIndexOf("/") + 1);
-}
-
-function messageOf(error: unknown): string {
-	return error instanceof Error ? error.message : String(error);
 }

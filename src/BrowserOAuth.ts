@@ -55,6 +55,10 @@ export class BrowserOAuth {
 	get hasClientSecret() {
 		return !!this.clientSecret();
 	}
+	private credentials() {
+		return { clientId: this.settings().oauthClientId.trim(), clientSecret: this.clientSecret() };
+	}
+
 	private clientSecret() {
 		const id = this.settings().oauthClientSecretId;
 		return id ? this.storage()?.getSecret(id) || undefined : undefined;
@@ -131,10 +135,7 @@ export class BrowserOAuth {
 		if (this.pending) return;
 		this.requireStorage();
 		const configuration = this.configuration();
-		const credentials = {
-			clientId: this.settings().oauthClientId.trim(),
-			clientSecret: this.clientSecret(),
-		};
+		const credentials = this.credentials();
 		this.cancel();
 		const controller = new AbortController();
 		this.controller = controller;
@@ -217,10 +218,7 @@ export class BrowserOAuth {
 		this.refreshController = controller;
 		const refreshing = (async () => {
 			const tokens = await this.client.refresh(
-				{
-					clientId: this.settings().oauthClientId.trim(),
-					clientSecret: this.clientSecret(),
-				},
+				this.credentials(),
 				stored.refreshToken,
 				controller.signal,
 			);

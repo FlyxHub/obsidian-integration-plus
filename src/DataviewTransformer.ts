@@ -4,6 +4,8 @@ import {
 	transformMarkdownCodeBlocks,
 	type MarkdownSourceTransformer,
 } from "@markdown-confluence/lib";
+import { toError } from "./errors";
+import { toVaultPath } from "./paths";
 
 /** The optional public Dataview API; no Dataview code is bundled or required by the CLI. */
 export interface DataviewApi {
@@ -97,11 +99,10 @@ export function createDataviewTransformer(
 						return yield* Effect.fail(
 							new Error("Dataview was disabled or reloaded during publication."),
 						);
-					// Obsidian's platform paths are vault paths with an optional leading slash.
-					const originFile = context.absoluteFilePath.replaceAll("\\", "/").replace(/^\/+/, "");
+					const originFile = toVaultPath(context.absoluteFilePath);
 					const result = yield* Effect.tryPromise({
 						try: () => api.queryMarkdown(block.content, originFile, { allowHtml: false }),
-						catch: (error) => (error instanceof Error ? error : new Error(String(error))),
+						catch: toError,
 					}).pipe(
 						Effect.timeout("30 seconds"),
 						Effect.mapError((error) =>

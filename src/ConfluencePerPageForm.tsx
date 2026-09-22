@@ -6,6 +6,9 @@ import { ConfluencePageConfig } from "@markdown-confluence/lib";
 type PageConfig = ConfluencePageConfig.ConfluencePerPageConfig;
 type PageConfigKey = keyof PageConfig;
 
+/** The per-page frontmatter settings the form edits, as the lib defines them. */
+const config = ConfluencePageConfig.conniePerPageConfig;
+
 export type ConfluencePerPageUIValues = {
 	[K in PageConfigKey]: {
 		value: PageConfig[K]["default"] | undefined;
@@ -38,7 +41,6 @@ function selectOptionsOf(field: object): string[] {
 export function mapFrontmatterToConfluencePerPageUIValues(
 	frontmatter: FrontMatterCache | undefined,
 ): ConfluencePerPageUIValues {
-	const config = ConfluencePageConfig.conniePerPageConfig;
 	const result: Record<string, { value: FieldValue; isSet: boolean }> = {};
 
 	for (const property of Object.keys(config) as PageConfigKey[]) {
@@ -56,13 +58,11 @@ export function mapFrontmatterToConfluencePerPageUIValues(
 }
 
 interface ModalProps {
-	config: PageConfig;
 	initialValues: ConfluencePerPageUIValues;
 	onSubmit: (values: ConfluencePerPageUIValues, close: () => void) => Promise<void> | void;
 }
 
 interface FormProps {
-	config: PageConfig;
 	initialValues: ConfluencePerPageUIValues;
 	onSubmit: (values: ConfluencePerPageUIValues) => void;
 }
@@ -139,7 +139,7 @@ const FieldInput = ({ id, field, value, onChange }: FieldProps) => {
 	}
 };
 
-const ConfluenceForm = ({ config, initialValues, onSubmit }: FormProps) => {
+const ConfluenceForm = ({ initialValues, onSubmit }: FormProps) => {
 	const [values, setValues] = useState(initialValues);
 	const [errors, setErrors] = useState<Partial<Record<PageConfigKey, Error[]>>>({});
 
@@ -235,11 +235,7 @@ export class ConfluencePerPageForm extends Modal {
 		this.root = createRoot(this.contentEl);
 		this.root.render(
 			<StrictMode>
-				<ConfluenceForm
-					config={this.modalProps.config}
-					initialValues={this.modalProps.initialValues}
-					onSubmit={onSubmit}
-				/>
+				<ConfluenceForm initialValues={this.modalProps.initialValues} onSubmit={onSubmit} />
 			</StrictMode>,
 		);
 	}
