@@ -23,6 +23,8 @@ export interface PullVault {
 	exists(path: string): boolean;
 	/** Create a note, and any missing parent folders. */
 	create(path: string, body: string, frontmatter: Record<string, string>): Promise<void>;
+	/** The note's current fingerprint, or undefined when it must always be published. */
+	fingerprint(path: string): Promise<string | undefined>;
 }
 
 export interface SiteUrls {
@@ -55,6 +57,8 @@ export interface PublishedPage {
 	pageId: string;
 	/** The publish left the page content as it was. */
 	unchanged: boolean;
+	/** The note's fingerprint after publishing; see `fingerprint.ts`. */
+	fingerprint: string | undefined;
 }
 
 export interface ConvertedPage {
@@ -154,7 +158,7 @@ export class PullService {
 			try {
 				const converted = await this.convertForPull(page, path, options, resolve, report);
 				await this.vault.create(path, converted.markdown, frontmatter);
-				await this.recordBase(page, converted);
+				await this.recordBase(page, converted, await this.vault.fingerprint(path));
 				report.imported.push(path);
 			} catch (error) {
 				report.skipped.push({ name: page.title, reason: errorMessage(error) });
@@ -174,14 +178,19 @@ export class PullService {
 	): Promise<{ pageId: string; reason: string }[]> {
 		const resolve = createPageLinkResolver(this.vault.linkedNotes(), this.vault.notePaths());
 		const failures: { pageId: string; reason: string }[] = [];
-		for (const { pageId, unchanged } of pages) {
+		for (const { pageId, unchanged, fingerprint } of pages) {
 			try {
 				const existing = await this.state.get(pageId);
-				if (unchanged && existing?.format === MERGE_FORMAT) continue;
+				if (unchanged && existing?.format === MERGE_FORMAT) {
+					// Confluence already matches the base; only the note's fingerprint is new.
+					if (existing.localFingerprint !== fingerprint)
+						await this.state.set({ ...existing, localFingerprint: fingerprint });
+					continue;
+				}
 				const page = await this.remote.getPage(pageId);
 				if (!page) continue;
 				const { converted } = await this.convert(page, urls, resolve, false);
-				await this.recordBase(page, converted);
+				await this.recordBase(page, converted, fingerprint);
 			} catch (error) {
 				failures.push({ pageId, reason: errorMessage(error) });
 			}
@@ -226,6 +235,11 @@ export class PullService {
 			return;
 		}
 
+		// A note that was in sync before the pull stays in sync if the merge is clean. One with
+		// local changes keeps its old fingerprint, so the next publish still sends it.
+		const wasInSync =
+			base?.localFingerprint !== undefined &&
+			(await this.vault.fingerprint(path)) === base.localFingerprint;
 		const remote = await this.convertForPull(page, path, options, resolve, report);
 		const { frontmatter, body } = splitFrontmatter(local);
 		let merged;
@@ -233,8 +247,9 @@ export class PullService {
 			merged = mergeThreeWay(body, base.markdown, remote.markdown);
 		} else if (page.authorId === (await this.currentAccountId())) {
 			// Published before pull existed and not edited by anyone else since: Confluence
-			// holds our own content, so record it as the base without touching the note.
-			await this.recordBase(page, remote);
+			// holds our own content, so record it as the base without touching the note. The
+			// note may have changed since, so it isn't marked as in sync.
+			await this.recordBase(page, remote, undefined);
 			report.unchanged++;
 			return;
 		} else {
@@ -246,7 +261,12 @@ export class PullService {
 			await this.vault.setFrontmatter(path, { [PAGE_TITLE_KEY]: page.title });
 			report.renamed.push({ path, title: page.title });
 		}
-		await this.recordBase(page, remote);
+		const inSync = wasInSync && merged.conflicts === 0;
+		await this.recordBase(
+			page,
+			remote,
+			inSync ? await this.vault.fingerprint(path) : base?.localFingerprint,
+		);
 
 		if (merged.conflicts > 0) report.conflicted.push(path);
 		else if (merged.text !== body) report.updated.push(path);
@@ -374,7 +394,11 @@ export class PullService {
 		return converted;
 	}
 
-	private async recordBase(page: RemotePage, converted: ConvertedPage) {
+	private async recordBase(
+		page: RemotePage,
+		converted: ConvertedPage,
+		localFingerprint: string | undefined,
+	) {
 		await this.state.set({
 			pageId: page.id,
 			version: page.version,
@@ -383,6 +407,7 @@ export class PullService {
 			format: MERGE_FORMAT,
 			unresolvedLinks: converted.unresolvedLinks,
 			unresolvedMedia: converted.unresolvedMedia,
+			localFingerprint,
 		});
 	}
 

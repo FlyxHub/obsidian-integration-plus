@@ -55,3 +55,25 @@ export async function checkBeforePublish(
 	}
 	return { blocked, upToDate };
 }
+
+/** Returns a note's current fingerprint, or undefined when it must always be published. */
+export type NoteFingerprinter = (path: string) => Promise<string | undefined>;
+
+/**
+ * Like `git status`, the notes that changed since a publish or pull last left them in sync
+ * with Confluence. Notes without a page or a recorded fingerprint always count as changed.
+ */
+export async function findChangedNotes(
+	notes: readonly NoteToPublish[],
+	state: SyncStateStore,
+	fingerprint: NoteFingerprinter,
+): Promise<NoteToPublish[]> {
+	const changed = await Promise.all(
+		notes.map(async (note) => {
+			if (!note.pageId) return true;
+			const recorded = (await state.get(note.pageId))?.localFingerprint;
+			return recorded === undefined || (await fingerprint(note.path)) !== recorded;
+		}),
+	);
+	return notes.filter((_, index) => changed[index]);
+}

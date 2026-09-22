@@ -1,7 +1,10 @@
 import { App, TFile, TFolder, normalizePath } from "obsidian";
 import { PAGE_ID_KEY } from "../frontmatterKeys";
 import { parentOf } from "../paths";
+import type { ObsidianPluginSettings } from "../settings";
+import { fingerprintNote, hasLiveQueries, noteReferences, publishSettingsKey } from "./fingerprint";
 import type { MediaVault } from "./media";
+import type { NoteFingerprinter } from "./publishGate";
 import type { PullVault } from "./pull";
 
 /** The page ID a note is linked to, from its `connie-page-id` frontmatter. */
@@ -11,7 +14,42 @@ export function linkedPageId(app: App, file: TFile): string | undefined {
 	return typeof value === "string" && /^\d+$/.test(value.trim()) ? value.trim() : undefined;
 }
 
-export function createObsidianPullVault(app: App): PullVault & MediaVault {
+/**
+ * Fingerprints notes as they are now. Embedded files count by modification time and size,
+ * and linked notes by the page they're published to, because both change the published page.
+ */
+export function createNoteFingerprinter(
+	app: App,
+	settings: ObsidianPluginSettings,
+): NoteFingerprinter {
+	const settingsKey = publishSettingsKey(settings);
+	return async (path) => {
+		const file = app.vault.getFileByPath(normalizePath(path));
+		if (!file) return undefined;
+		const text = await app.vault.read(file);
+		if (hasLiveQueries(text, settings)) return undefined;
+		const { embeds, links } = noteReferences(text);
+		const target = (link: string) => app.metadataCache.getFirstLinkpathDest(link, file.path);
+		const dependencies = [
+			...embeds.map((link) => {
+				const embedded = target(link);
+				return embedded
+					? `embed:${embedded.path}:${embedded.stat.mtime}:${embedded.stat.size}`
+					: `embed:${link}:missing`;
+			}),
+			...links.map((link) => {
+				const linked = target(link);
+				return `link:${link}:${linked?.path ?? ""}:${linked ? (linkedPageId(app, linked) ?? "") : ""}`;
+			}),
+		];
+		return fingerprintNote({ path: file.path, text, dependencies, settings: settingsKey });
+	};
+}
+
+export function createObsidianPullVault(
+	app: App,
+	fingerprint: NoteFingerprinter,
+): PullVault & MediaVault {
 	const fileAt = (path: string) => {
 		const file = app.vault.getFileByPath(normalizePath(path));
 		if (!file) throw new Error(`Note not found: ${path}`);
@@ -66,6 +104,8 @@ export function createObsidianPullVault(app: App): PullVault & MediaVault {
 		},
 
 		exists: (path) => app.vault.getAbstractFileByPath(normalizePath(path)) !== null,
+
+		fingerprint,
 
 		async create(path, body, frontmatter) {
 			const notePath = normalizePath(path);

@@ -2,7 +2,7 @@ import { expect, test } from "@effect/vitest";
 import { parseMarkdownToADF } from "@markdown-confluence/lib";
 import { MERGE_FORMAT, adfToMergeMarkdown } from "./adfMarkdown";
 import type { ConfluenceRemote, RemoteChild, RemotePage } from "./confluenceRemote";
-import { HAS_CONFLICTS, NEEDS_PULL, checkBeforePublish } from "./publishGate";
+import { HAS_CONFLICTS, NEEDS_PULL, checkBeforePublish, findChangedNotes } from "./publishGate";
 import { PullService, isFolderNote, isGeneratedFolderPage, type PullVault } from "./pull";
 import { MediaSync, safeFileName } from "./media";
 import { toNoteName } from "./names";
@@ -86,9 +86,13 @@ function fakeVault(files: Record<string, string>) {
 			files[path] = body;
 			frontmatter.set(path, values);
 		},
+		fingerprint: async (path) => (path in files ? fingerprintOf(files[path]!) : undefined),
 	};
 	return { vault, files, frontmatter };
 }
+
+/** The fake vault's fingerprint: the note text itself, which is enough to compare. */
+const fingerprintOf = (text: string) => `fp:${text}`;
 
 const base = (id: string, markdown: string, version: number): SyncBase => ({
 	pageId: id,
@@ -492,13 +496,75 @@ test("records published pages as pull bases, skipping unchanged pages already re
 	};
 	const failures = await new PullService(remote, vault, store).recordPublished(
 		[
-			{ pageId: "1", unchanged: false },
-			{ pageId: "2", unchanged: true },
-			{ pageId: "3", unchanged: false },
+			{ pageId: "1", unchanged: false, fingerprint: "one" },
+			{ pageId: "2", unchanged: true, fingerprint: "two" },
+			{ pageId: "3", unchanged: false, fingerprint: "three" },
 		],
 		OPTIONS,
 	);
-	expect(bases.get("1")).toMatchObject({ version: 4, markdown: "Text.\n", format: MERGE_FORMAT });
-	expect(bases.get("2")?.version).toBe(1);
+	expect(bases.get("1")).toMatchObject({
+		version: 4,
+		markdown: "Text.\n",
+		format: MERGE_FORMAT,
+		localFingerprint: "one",
+	});
+	expect(bases.get("2")).toMatchObject({ version: 1, localFingerprint: "two" });
 	expect(failures).toEqual([{ pageId: "3", reason: "Forbidden" }]);
+});
+
+test("a note that was in sync stays in sync after a clean pull", async () => {
+	const note = '---\nconnie-page-id: "1"\n---\nIntro.\n\nOutro.\n';
+	const { vault, files } = fakeVault({ "A.md": note });
+	const { store, bases } = fakeState([
+		{ ...base("1", "Intro.\n\nOutro.\n", 3), localFingerprint: fingerprintOf(note) },
+	]);
+	const remote = fakeRemote([page("1", "Intro.\n\nOutro, edited.\n", 4)]);
+	await new PullService(remote, vault, store).pull(OPTIONS);
+	expect(files["A.md"]).toContain("Outro, edited.");
+	expect(bases.get("1")?.localFingerprint).toBe(fingerprintOf(files["A.md"]!));
+});
+
+test("a note with local changes stays marked as changed after a pull", async () => {
+	const published = '---\nconnie-page-id: "1"\n---\nIntro.\n\nOutro.\n';
+	const { vault, files } = fakeVault({
+		"A.md": '---\nconnie-page-id: "1"\n---\nIntro, local.\n\nOutro.\n',
+	});
+	const { store, bases } = fakeState([
+		{ ...base("1", "Intro.\n\nOutro.\n", 3), localFingerprint: fingerprintOf(published) },
+	]);
+	const remote = fakeRemote([page("1", "Intro.\n\nOutro, edited.\n", 4)]);
+	await new PullService(remote, vault, store).pull(OPTIONS);
+	expect(files["A.md"]).toContain("Intro, local.");
+	expect(bases.get("1")?.localFingerprint).toBe(fingerprintOf(published));
+});
+
+test("imported notes start in sync", async () => {
+	const { vault, files } = fakeVault({});
+	const { store, bases } = fakeState();
+	const remote = fakeRemote([page("30", "Imported.\n", 1, { title: "New page" })], {
+		root: [{ id: "30", title: "New page" }],
+	});
+	await new PullService(remote, vault, store).pull({
+		...OPTIONS,
+		importUnder: { rootPageId: "root", rootFolder: "Docs" },
+	});
+	expect(bases.get("30")?.localFingerprint).toBe(fingerprintOf(files["Docs/New page.md"]!));
+});
+
+test("publishing changes skips notes whose fingerprint matches the last sync", async () => {
+	const { store } = fakeState([
+		{ ...base("1", "A.\n", 1), localFingerprint: "same" },
+		{ ...base("2", "B.\n", 1), localFingerprint: "old" },
+		base("3", "C.\n", 1),
+	]);
+	const notes = [
+		{ path: "A.md", pageId: "1", text: "" },
+		{ path: "B.md", pageId: "2", text: "" },
+		{ path: "C.md", pageId: "3", text: "" },
+		{ path: "New.md", pageId: undefined, text: "" },
+	];
+	const changed = await findChangedNotes(notes, store, async (path) =>
+		path === "A.md" ? "same" : "new",
+	);
+	expect(changed.map((note) => note.path)).toEqual(["B.md", "C.md", "New.md"]);
 });

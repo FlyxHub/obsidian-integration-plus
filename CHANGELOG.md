@@ -2,6 +2,14 @@
 
 All notable changes to Confluence Integration Plus are listed here. For the history of the plugin this one was forked from, see the [markdown-confluence changelog](https://github.com/markdown-confluence/markdown-confluence/blob/main/CHANGELOG.md).
 
+## 1.1.0 (unreleased)
+
+### Features
+
+- **Publish all notes** is now **Publish changes**: it publishes only the notes that changed since a publish or pull last left them in sync with Confluence, including changes to embedded notes and images. Unchanged notes are skipped, so publishing is faster and isn't blocked by Confluence edits to notes you didn't change. Existing hotkeys keep working.
+- **Republish all notes** publishes every selected note, as **Publish all notes** did before. Use it after changing your Obsidian theme or CSS snippets.
+- Notes published with an earlier version count as changed until they're published once.
+
 ## 1.0.0 (2026-09-22)
 
 First release as Confluence Integration Plus, forked from Confluence Integration 7.0.0.

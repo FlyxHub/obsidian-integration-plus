@@ -44,10 +44,20 @@ import { isExcluded, publishFlagFor } from "./publishSelection";
 import { createAttachmentDownloader } from "./sync/attachmentDownload";
 import { createConfluenceRemote, type AttachmentDownload } from "./sync/confluenceRemote";
 import { MediaSync } from "./sync/media";
-import { createObsidianPullVault, linkedPageId } from "./sync/obsidianVault";
+import {
+	createNoteFingerprinter,
+	createObsidianPullVault,
+	linkedPageId,
+} from "./sync/obsidianVault";
+import { notesForPartialPublish, partialWorkspace } from "./sync/partialPublish";
 import { PullService } from "./sync/pull";
 import { PullResultsModal, summarizePull } from "./sync/PullResultsModal";
-import { checkBeforePublish, type NoteToPublish } from "./sync/publishGate";
+import {
+	checkBeforePublish,
+	findChangedNotes,
+	type NoteFingerprinter,
+	type NoteToPublish,
+} from "./sync/publishGate";
 import { createSyncStateStore, type SyncStateStore } from "./sync/syncState";
 import {
 	ObsidianPluginSettings,
@@ -66,6 +76,9 @@ const LEGACY_PLUGIN_ID = "confluence-integration";
 const EDITED_BY_OTHER_USER = "Page last updated by another user";
 
 type ConfluenceClient = Awaited<ReturnType<typeof createObsidianConfluenceClient>>;
+
+/** What a publish sends: one note, the notes changed since they were last in sync, or all. */
+type PublishScope = { note: string } | "changes" | "all";
 
 export default class ConfluencePlugin extends Plugin {
 	settings!: ObsidianPluginSettings;
@@ -96,8 +109,8 @@ export default class ConfluencePlugin extends Plugin {
 		this.syncStatus.addClass("confluence-publish-status");
 		this.registerDomEvent(this.syncStatus, "click", () => this.cancelSync());
 
-		this.addRibbonIcon("cloud-upload", "Publish to Confluence", () => {
-			void this.runPublish();
+		this.addRibbonIcon("cloud-upload", "Publish changes to Confluence", () => {
+			void this.runPublish("changes");
 		});
 		this.addRibbonIcon("cloud-download", "Pull from Confluence", () => {
 			void this.runPull();
@@ -129,16 +142,25 @@ export default class ConfluencePlugin extends Plugin {
 			checkCallback: (checking) => {
 				const activePath = this.app.workspace.getActiveViewOfType(MarkdownView)?.file?.path;
 				if (!activePath) return false;
-				if (!checking) void this.runPublish(activePath);
+				if (!checking) void this.runPublish({ note: activePath });
 				return true;
 			},
 		});
 
+		// The ID predates the rename to "Publish changes"; keeping it keeps users' hotkeys.
 		this.addCommand({
 			id: "publish-all",
-			name: "Publish all notes",
+			name: "Publish changes",
 			callback: () => {
-				void this.runPublish();
+				void this.runPublish("changes");
+			},
+		});
+
+		this.addCommand({
+			id: "republish-all",
+			name: "Republish all notes",
+			callback: () => {
+				void this.runPublish("all");
 			},
 		});
 
@@ -338,7 +360,7 @@ export default class ConfluencePlugin extends Plugin {
 	/** Pull and publish-time base recording share one service, with the same image handling. */
 	private createPullService(client: ConfluenceClient, download?: AttachmentDownload): PullService {
 		const remote = createConfluenceRemote(client, download);
-		const vault = createObsidianPullVault(this.app);
+		const vault = createObsidianPullVault(this.app, this.fingerprinter());
 		const media = new MediaSync(remote, vault, this.syncState, this.settings.imageFolder);
 		return new PullService(remote, vault, this.syncState, media);
 	}
@@ -375,10 +397,20 @@ export default class ConfluencePlugin extends Plugin {
 		});
 	}
 
-	private async runPublish(publishFilter?: string): Promise<void> {
+	/** Fingerprints notes with the current settings; see `sync/fingerprint.ts`. */
+	private fingerprinter(): NoteFingerprinter {
+		return createNoteFingerprinter(this.app, this.settings);
+	}
+
+	private async runPublish(scope: PublishScope): Promise<void> {
 		await this.runExclusive(async (signal) => {
 			try {
-				this.showPublishResults(await this.doPublish(signal, publishFilter));
+				const results = await this.doPublish(signal, scope);
+				if (results) this.showPublishResults(results);
+				else
+					new Notice(
+						"No notes changed since they were last published or pulled. To publish every note again, republish all notes from the command palette.",
+					);
 			} catch (error) {
 				this.showPublishResults({
 					errorMessage: errorMessage(error),
@@ -389,13 +421,35 @@ export default class ConfluencePlugin extends Plugin {
 		});
 	}
 
-	private async doPublish(signal: AbortSignal, publishFilter?: string): Promise<UploadResults> {
+	/** Publish the notes in scope. Returns undefined when publishing changes and none changed. */
+	private async doPublish(
+		signal: AbortSignal,
+		scope: PublishScope,
+	): Promise<UploadResults | undefined> {
 		const client = await this.authenticationClient();
-		const check = await checkBeforePublish(
-			await this.notesToPublish(publishFilter),
-			createConfluenceRemote(client),
-			this.syncState,
-		);
+		const fingerprint = this.fingerprinter();
+		const publishFilter = typeof scope === "object" ? scope.note : undefined;
+		const candidates = await this.notesToPublish(publishFilter);
+		const notes =
+			scope === "changes"
+				? await findChangedNotes(candidates, this.syncState, fingerprint)
+				: candidates;
+		if (notes.length === 0) return undefined;
+		const changed = scope === "changes" ? new Set(notes.map((note) => note.path)) : undefined;
+		// Publishing changes hands the lib only the changed notes and the folder notes the page
+		// tree needs around them. Those are published too, so they go through the check as well.
+		const selection = changed
+			? notesForPartialPublish(
+					candidates.map((note) => note.path),
+					[...changed],
+				)
+			: undefined;
+		const partial = selection ? new Set(selection) : undefined;
+		const toCheck = changed
+			? candidates.filter((note) => !partial || partial.has(note.path))
+			: notes;
+
+		const check = await checkBeforePublish(toCheck, createConfluenceRemote(client), this.syncState);
 		if (check.blocked.length > 0) {
 			return {
 				errorMessage:
@@ -406,9 +460,16 @@ export default class ConfluencePlugin extends Plugin {
 		}
 
 		const mermaidStyles = await loadMermaidStyles(this.app, this.settings.mermaidTheme);
-		const publisher = this.createPublisher(client, mermaidStyles);
+		// A partial publish never overwrites other users' edits on the unchanged folder notes
+		// it includes, and page ordering needs every sibling, so it only runs on full publishes.
+		const publisher = this.createPublisher(
+			client,
+			mermaidStyles,
+			changed ? { forceOverwrite: false, orderPages: false } : {},
+		);
 		const results = await this.runObsidianEffect(
 			publisher.publishEffect(publishFilter, { signal }),
+			partial,
 		);
 
 		const uploadResults: UploadResults = {
@@ -420,9 +481,15 @@ export default class ConfluencePlugin extends Plugin {
 			const path = toVaultPath(result.node.file.absoluteFilePath);
 			let uploaded = result.successfulUploadResult;
 			let reason = result.reason;
+			const editedByOtherUser = !uploaded && !!reason?.includes(EDITED_BY_OTHER_USER);
+			// Unchanged notes included only for the page tree aren't reported, unless they failed.
+			if (changed && !changed.has(path) && (uploaded || editedByOtherUser)) continue;
 			// The page was last edited by someone else, but that edit is exactly the version
-			// that was pulled and merged into this note, so it's safe to publish over it.
-			if (!uploaded && reason?.includes(EDITED_BY_OTHER_USER) && check.upToDate.has(path)) {
+			// that was pulled and merged into this note, so it's safe to publish over it. A
+			// partial publish also applies the "Overwrite other users' edits" setting here.
+			const mayOverwrite =
+				check.upToDate.has(path) || (changed !== undefined && this.settings.forceOverwrite);
+			if (editedByOtherUser && mayOverwrite) {
 				signal.throwIfAborted();
 				const forced = this.createPublisher(client, mermaidStyles, { forceOverwrite: true });
 				const retry = (await this.runObsidianEffect(forced.publishEffect(path, { signal }))).find(
@@ -440,22 +507,31 @@ export default class ConfluencePlugin extends Plugin {
 		}
 
 		uploadResults.failedFiles.push(
-			...(await this.recordPublishedBases(client, uploadResults.filesUploadResult)),
+			...(await this.recordPublishedBases(client, uploadResults.filesUploadResult, fingerprint)),
 		);
 		return uploadResults;
 	}
 
-	/** After publishing, remember what Confluence now holds as the base for the next pull. */
+	/**
+	 * After publishing, remember what Confluence now holds as the base for the next pull, and
+	 * each note's fingerprint, so the next "Publish changes" skips it until it changes.
+	 */
 	private async recordPublishedBases(
 		client: ConfluenceClient,
 		uploads: UploadResults["filesUploadResult"],
+		fingerprint: NoteFingerprinter,
 	): Promise<UploadResults["failedFiles"]> {
 		const pathsById = new Map<string, string>();
 		const pages = [];
 		for (const { adfFile, contentResult } of uploads) {
 			if (!adfFile.pageId) continue;
-			pathsById.set(adfFile.pageId, toVaultPath(adfFile.absoluteFilePath));
-			pages.push({ pageId: adfFile.pageId, unchanged: contentResult === "same" });
+			const path = toVaultPath(adfFile.absoluteFilePath);
+			pathsById.set(adfFile.pageId, path);
+			pages.push({
+				pageId: adfFile.pageId,
+				unchanged: contentResult === "same",
+				fingerprint: await fingerprint(path),
+			});
 		}
 		const failures = await this.createPullService(client).recordPublished(
 			pages,
@@ -523,12 +599,17 @@ export default class ConfluencePlugin extends Plugin {
 		return new Publisher(settings, confluenceClient, plugins, (message) => this.setStatus(message));
 	}
 
+	/** Run a lib effect in Obsidian; `onlyNotes` narrows the workspace for a partial publish. */
 	private runObsidianEffect<A, E>(
 		effect: Effect.Effect<A, E, MarkdownConfluencePlatform | MarkdownWorkspaceService>,
+		onlyNotes?: ReadonlySet<string>,
 	): Promise<A> {
+		const workspace = onlyNotes
+			? partialWorkspace(onlyNotes).pipe(Layer.provide(MarkdownWorkspaceLive))
+			: MarkdownWorkspaceLive;
 		return Effect.runPromise(
 			effect.pipe(
-				Effect.provide(MarkdownWorkspaceLive),
+				Effect.provide(workspace),
 				Effect.provideService(MarkdownSourceTransformerService, this.sourceTransformer()),
 				Effect.provide(
 					Layer.succeed(

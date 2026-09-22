@@ -105,7 +105,7 @@ Unit tests run in Node.js, where the `obsidian` package provides only types. Cod
 1. Open the developer console. On Windows and Linux, press `Ctrl+Shift+I`. On macOS, press `Cmd+Option+I`.
 1. [Connect to Confluence](README.md#connect-to-confluence), using your test page as the parent page.
 1. In the folder to publish, create a note that contains a heading, an image, and a Mermaid diagram.
-1. Run **Publish all notes**.
+1. Run **Publish changes**.
 1. Verify the following:
    - The results dialog reports no failures.
    - The page in Confluence shows the heading, image, and diagram.
@@ -114,6 +114,17 @@ Unit tests run in Node.js, where the `obsidian` package provides only types. Cod
 1. Edit the note, publish it again, and verify that the plugin updates the same Confluence page.
 1. Start a publish of several notes, and then run **Cancel publish or pull after the current request**. Verify that the publish stops.
 
+#### Test publishing changes
+
+1. Publish several notes in different folders, including a folder with a folder note.
+1. Run **Publish changes** without editing anything. Verify that a notice says that no notes changed.
+1. Edit one note in a subfolder, and then run **Publish changes**. Verify the following:
+   - The results list only that note.
+   - In Confluence, the page is still under the same parent page, and the folder note's page is unchanged.
+1. Edit an image that a note embeds, and run **Publish changes**. Verify that the note that embeds it is published.
+1. Change **Mermaid theme**, and run **Publish changes**. Verify that every note is published.
+1. Run **Republish all notes**. Verify that every note is published, and that **Apply page ordering** runs if it's on.
+
 #### Test pulling
 
 These steps need a second Confluence account, or a colleague, to act as the other editor.
@@ -121,11 +132,11 @@ These steps need a second Confluence account, or a colleague, to act as the othe
 1. Publish a note that contains a Mermaid diagram and at least three paragraphs.
 1. Run **Pull all notes**. Verify that the dialog reports the note as unchanged.
 1. As the other user, edit the last paragraph in Confluence.
-1. In Obsidian, edit the first paragraph, and then run **Publish all notes**. Verify that nothing is published and the dialog says to pull the note first.
+1. In Obsidian, edit the first paragraph, and then run **Publish changes**. Verify that nothing is published and the dialog says to pull the note first.
 1. Run **Pull all notes**. Verify the following:
    - The dialog lists the note as updated.
    - The note contains your edit, the Confluence edit, and the Mermaid source.
-1. Run **Publish all notes**, and verify that the page in Confluence shows both edits.
+1. Run **Publish changes**, and verify that the page in Confluence shows both edits.
 1. As the other user, edit the first paragraph in Confluence. In Obsidian, edit the same paragraph differently, and then pull. Verify that the note contains conflict markers, and that publishing is refused until you remove them.
 1. As the other user, create a page under the parent page. Pull, and verify that a new note with its `connie-page-id` appears in the folder to publish.
 1. As the other user, add a `dataviewjs` code block to a page. Pull, and verify that the block arrives as a `text` code block.

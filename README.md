@@ -65,13 +65,30 @@ If a setting needs attention, the plugin lists it at the top of the settings tab
 
 To publish notes, do any of the following:
 
-- To publish every selected note, click **Publish to Confluence** (the cloud upload icon) in the ribbon, or run **Publish all notes** from the command palette.
-- To publish only the active note, run **Publish current note**.
+- To publish the notes that you changed, click **Publish changes to Confluence** (the cloud upload icon) in the ribbon, or run **Publish changes** from the command palette.
+- To publish only the active note, run **Publish current note**. It publishes the note even if it hasn't changed.
+- To publish every selected note, run **Republish all notes**.
 - To stop a publish or pull, click the status bar item or run **Cancel publish or pull after the current request**. The plugin keeps pages that it already wrote.
 
 After a note is published, the plugin adds `connie-page-id` and `connie-page-url` to its frontmatter.
 
 To manage an existing Confluence page from Obsidian, create a note and set its `connie-page-id` property to the page ID.
+
+### What counts as a change
+
+**Publish changes** sends only the notes that changed since a publish or pull last left them in sync with Confluence. A note counts as changed when any of the following is true:
+
+- You edited its text or frontmatter, or moved or renamed it.
+- A note or image that it embeds changed, or a note that it links to was published for the first time.
+- It hasn't been published yet, or it was last published with an earlier version of this plugin.
+- It contains a Dataview query, and **Publish Dataview results** is on. Query results can change without the note changing, so these notes are always published.
+- You changed a setting that affects publishing, such as the parent page, the folder to publish, or a diagram setting. Every note counts as changed.
+
+Pulling keeps this up to date. A note that was in sync before a pull stays in sync if Confluence's changes merge cleanly. A note that has your unpublished edits stays marked as changed after a pull.
+
+To also publish the folder pages above them, **Publish changes** sends the folder notes of the folders that changed notes are in. Those folder notes aren't listed in the results unless they fail, but they go through the same checks as changed notes: a folder note with conflict markers or unpulled Confluence changes stops the publish. **Apply page ordering** runs only with **Republish all notes**.
+
+Run **Republish all notes** after you change your Obsidian theme or CSS snippets, which the plugin can't detect, or whenever you want every page to match your notes.
 
 **Note:** The plugin doesn't publish over changes in Confluence that you haven't pulled. To bring those changes into your notes, see [Pull changes from Confluence](#pull-changes-from-confluence). To overwrite them instead, turn on **Overwrite other users' edits**; the other user's changes are lost.
 
