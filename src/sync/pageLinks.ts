@@ -1,4 +1,6 @@
 import { resolveConfluencePageId } from "@markdown-confluence/lib";
+import { createFenceTracker } from "../fences";
+import { baseName } from "../paths";
 
 /** Returns the wikilink target for a Confluence page ID, or undefined if no note has it. */
 export type PageLinkResolver = (pageId: string) => string | undefined;
@@ -9,7 +11,6 @@ export interface RewrittenLinks {
 	unresolved: string[];
 }
 
-const FENCE = /^(\s*(?:>\s?)*)(`{3,}|~{3,})/;
 const TABLE_ROW = /^\s*(?:>\s?)*\|/;
 const MARKDOWN_LINK = /\[((?:[^[\]\\]|\\.)*)\]\(([^()\s]+)\)/g;
 const MARKDOWN_ESCAPE = /\\([\\`*_{}[\]()#+\-.!|<>~])/g;
@@ -25,16 +26,9 @@ export function rewritePageLinks(
 	resolve: PageLinkResolver,
 ): RewrittenLinks {
 	const unresolved = new Set<string>();
-	let fence: string | undefined;
+	const inCode = createFenceTracker();
 	const lines = markdown.split("\n").map((line) => {
-		const fenceMatch = FENCE.exec(line);
-		if (fenceMatch) {
-			const marker = fenceMatch[2]!;
-			if (!fence) fence = marker;
-			else if (marker[0] === fence[0] && marker.length >= fence.length) fence = undefined;
-			return line;
-		}
-		if (fence) return line;
+		if (inCode(line)) return line;
 		const separator = TABLE_ROW.test(line) ? "\\|" : "|";
 		// Odd segments of a backtick split are inline code.
 		return line
@@ -106,22 +100,28 @@ function toWikilink(
 	// Without an alias, Obsidian shows the link target and publishing uses it as the link
 	// text, so drop the alias only when it's exactly the target. Smart links show the URL as
 	// their text, so they become a plain `[[Note]]`.
-	if (!anchor && (text === linkText || text === href || text === "")) return `[[${target}]]`;
-	if (anchor && (text === href || text === "")) return `[[${target}]]`;
+	if (text === href || text === "" || (!anchor && text === linkText)) return `[[${target}]]`;
 	return `[[${target}${separator}${text}]]`;
 }
 
 /**
  * Obsidian's default link format: the note name when it's unique in the vault, otherwise
- * the vault path. Both omit `.md`.
+ * the vault path. Both omit `.md`. Build it once and reuse it for every link in a pull.
  */
-export function linkTextFor(path: string, allNotePaths: readonly string[]): string {
-	const withoutExtension = path.replace(/\.md$/, "");
-	const name = withoutExtension.slice(withoutExtension.lastIndexOf("/") + 1);
-	const sameName = allNotePaths.filter(
-		(other) => other.replace(/\.md$/, "").split("/").pop() === name,
-	);
-	return sameName.length <= 1 ? name : withoutExtension;
+export function createLinkTextIndex(allPaths: readonly string[]): (path: string) => string {
+	const namesInUse = new Map<string, number>();
+	for (const path of allPaths) {
+		const name = linkName(path);
+		namesInUse.set(name, (namesInUse.get(name) ?? 0) + 1);
+	}
+	return (path) => {
+		const name = linkName(path);
+		return (namesInUse.get(name) ?? 0) <= 1 ? name : path.replace(/\.md$/, "");
+	};
+}
+
+function linkName(path: string): string {
+	return baseName(path).replace(/\.md$/, "");
 }
 
 /** A resolver over page ID → note path, using Obsidian's shortest-unique link format. */
@@ -129,8 +129,9 @@ export function createPageLinkResolver(
 	pathsById: ReadonlyMap<string, string>,
 	allNotePaths: readonly string[],
 ): PageLinkResolver {
+	const linkText = createLinkTextIndex(allNotePaths);
 	return (pageId) => {
 		const path = pathsById.get(pageId);
-		return path ? linkTextFor(path, allNotePaths) : undefined;
+		return path ? linkText(path) : undefined;
 	};
 }

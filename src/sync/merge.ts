@@ -1,7 +1,7 @@
 import { diff3Merge, diffComm } from "node-diff3";
 
-export const LOCAL_LABEL = "Obsidian";
-export const REMOTE_LABEL = "Confluence";
+const LOCAL_LABEL = "Obsidian";
+const REMOTE_LABEL = "Confluence";
 const START = `<<<<<<< ${LOCAL_LABEL}`;
 const MIDDLE = "=======";
 const END = `>>>>>>> ${REMOTE_LABEL}`;

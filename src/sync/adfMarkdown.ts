@@ -163,7 +163,7 @@ export function sameContent(left: unknown, right: unknown): boolean {
 }
 
 /** Remove editor-only attributes, and empty `attrs`/`marks`, so fragments compare by content. */
-export function stripPresentation<T>(value: T): T {
+function stripPresentation<T>(value: T): T {
 	if (Array.isArray(value)) return value.map(stripPresentation) as T;
 	if (!value || typeof value !== "object") return value;
 	const result: Record<string, unknown> = {};

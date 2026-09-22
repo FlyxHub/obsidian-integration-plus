@@ -7,12 +7,10 @@ export interface RemotePage {
 	version: number;
 	authorId: string;
 	adf: unknown;
-	parentId: string | undefined;
 }
 
 export interface RemoteVersion {
 	version: number;
-	authorId: string;
 }
 
 export interface RemoteChild {
@@ -67,7 +65,7 @@ export function createConfluenceRemote(
 			try {
 				page = await client.content.getContentById({
 					id,
-					expand: ["body.atlas_doc_format", "version", "ancestors"],
+					expand: ["body.atlas_doc_format", "version"],
 				});
 			} catch (error) {
 				if (statusOf(error) === 404) return undefined;
@@ -81,7 +79,6 @@ export function createConfluenceRemote(
 				version: page.version?.number ?? 0,
 				authorId: page.version?.by?.accountId ?? "",
 				adf: JSON.parse(body) as unknown,
-				parentId: page.ancestors?.at(-1)?.id,
 			};
 		},
 
@@ -97,10 +94,7 @@ export function createConfluenceRemote(
 				for (const entry of resultsOf(response)) {
 					const version = recordOf(entry["version"]);
 					if (typeof entry["id"] !== "string" || typeof version["number"] !== "number") continue;
-					versions.set(entry["id"], {
-						version: version["number"],
-						authorId: typeof version["authorId"] === "string" ? version["authorId"] : "",
-					});
+					versions.set(entry["id"], { version: version["number"] });
 				}
 			}
 			return versions;

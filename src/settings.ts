@@ -127,6 +127,29 @@ export function withSiteUrlFallback<T extends ConfluenceUploadSettings.Confluenc
 	return { ...settings, confluenceBaseUrl: siteUrl };
 }
 
+/** Browser sign-in: OAuth tokens from the plugin's own login instead of stored credentials. */
+export function usesBrowserLogin(
+	settings: Pick<ObsidianPluginSettings, "confluenceAuthType" | "oauthMode">,
+): boolean {
+	return settings.confluenceAuthType === "oauth2" && settings.oauthMode === "browser";
+}
+
+/** Browser sign-in reaches a site through Atlassian's API gateway, by the site's cloud ID. */
+export function oauthApiUrl(siteId: string): string {
+	return `https://api.atlassian.com/ex/confluence/${siteId}`;
+}
+
+/**
+ * Settings to validate or authenticate with when an OAuth access token is used. The lib
+ * treats the token as a bearer token, so the other credential fields aren't required.
+ */
+export function withBearerToken<T extends ConfluenceUploadSettings.ConfluenceSettings>(
+	settings: T,
+	token: string,
+): T {
+	return { ...settings, confluenceAuthType: "bearer", atlassianApiToken: token };
+}
+
 /** Setting names as the settings tab shows them, for validation messages. */
 const SETTING_LABELS: Partial<Record<keyof ObsidianPluginSettings, string>> = {
 	confluenceBaseUrl: "Confluence API URL",

@@ -1,8 +1,8 @@
 import { App, TFile, TFolder, normalizePath } from "obsidian";
+import { PAGE_ID_KEY } from "../frontmatterKeys";
+import { parentOf } from "../paths";
 import type { MediaVault } from "./media";
 import type { PullVault } from "./pull";
-
-export const PAGE_ID_KEY = "connie-page-id";
 
 /** The page ID a note is linked to, from its `connie-page-id` frontmatter. */
 export function linkedPageId(app: App, file: TFile): string | undefined {
@@ -23,7 +23,7 @@ export function createObsidianPullVault(app: App): PullVault & MediaVault {
 		const existing = app.vault.getAbstractFileByPath(path);
 		if (existing instanceof TFolder) return;
 		if (existing) throw new Error(`${path} exists and is not a folder.`);
-		await ensureFolder(path.slice(0, Math.max(0, path.lastIndexOf("/"))));
+		await ensureFolder(parentOf(path));
 		await app.vault.createFolder(path);
 	};
 
@@ -43,7 +43,7 @@ export function createObsidianPullVault(app: App): PullVault & MediaVault {
 
 		async writeBinary(path, data) {
 			const filePath = normalizePath(path);
-			await ensureFolder(filePath.slice(0, Math.max(0, filePath.lastIndexOf("/"))));
+			await ensureFolder(parentOf(filePath));
 			await app.vault.createBinary(filePath, Uint8Array.from(data).buffer);
 		},
 
@@ -69,7 +69,7 @@ export function createObsidianPullVault(app: App): PullVault & MediaVault {
 
 		async create(path, body, frontmatter) {
 			const notePath = normalizePath(path);
-			await ensureFolder(notePath.slice(0, Math.max(0, notePath.lastIndexOf("/"))));
+			await ensureFolder(parentOf(notePath));
 			const file = await app.vault.create(notePath, body);
 			if (!(file instanceof TFile)) throw new Error(`Could not create ${notePath}.`);
 			await app.fileManager.processFrontMatter(file, (values: Record<string, unknown>) => {

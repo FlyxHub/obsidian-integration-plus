@@ -1,16 +1,10 @@
-import { request } from "node:https";
 import type { ConfluenceFetch, RequiredConfluenceClient } from "@markdown-confluence/lib";
+import { isRedirect, nodeRequest } from "../nodeRequest";
 
 /** Largest attachment pull will download. */
-export const MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024;
+const MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024;
 const MAX_MEDIA_REDIRECTS = 3;
 const DOWNLOAD_PATH = /\/wiki\/rest\/api\/content\/\d+\/child\/attachment\/[^/]+\/download$/;
-
-interface RawResponse {
-	status: number;
-	location: string | undefined;
-	body: Uint8Array;
-}
 
 type Captured = { bytes: Uint8Array } | { location: string };
 
@@ -28,8 +22,12 @@ export function createAttachmentDownloader(baseFetch: ConfluenceFetch) {
 
 	const fetch: ConfluenceFetch = async (url, init) => {
 		if (!DOWNLOAD_PATH.test(new URL(url).pathname)) return baseFetch(url, init);
-		const response = await rawRequest(url, headersOf(init.headers), init.signal ?? undefined);
-		if (response.status >= 300 && response.status < 400 && response.location) {
+		const response = await download(
+			url,
+			Object.fromEntries(new Headers(init.headers)),
+			init.signal,
+		);
+		if (isRedirect(response.status) && response.location) {
 			captured.set(url, { location: new URL(response.location, url).href });
 			return jsonResponse(200);
 		}
@@ -40,11 +38,10 @@ export function createAttachmentDownloader(baseFetch: ConfluenceFetch) {
 		return jsonResponse(response.status);
 	};
 
-	async function download(
+	async function downloadAttachment(
 		client: RequiredConfluenceClient,
 		pageId: string,
 		attachmentId: string,
-		signal?: AbortSignal,
 	): Promise<Uint8Array> {
 		const path = `/wiki/rest/api/content/${encodeURIComponent(pageId)}/child/attachment/${encodeURIComponent(attachmentId)}/download`;
 		await client.sendRequest({ method: "GET", url: path });
@@ -52,19 +49,19 @@ export function createAttachmentDownloader(baseFetch: ConfluenceFetch) {
 		const result = key ? captured.get(key) : undefined;
 		if (key) captured.delete(key);
 		if (!result) throw new Error("Confluence didn't return the attachment.");
-		return "bytes" in result ? result.bytes : fetchMedia(result.location, signal);
+		return "bytes" in result ? result.bytes : fetchMedia(result.location);
 	}
 
-	return { fetch, download };
+	return { fetch, download: downloadAttachment };
 }
 
 /** Follow the media service's redirects without credentials, only to Atlassian hosts. */
-async function fetchMedia(location: string, signal?: AbortSignal): Promise<Uint8Array> {
+async function fetchMedia(location: string): Promise<Uint8Array> {
 	let url = location;
 	for (let hop = 0; hop <= MAX_MEDIA_REDIRECTS; hop++) {
 		assertAtlassianMediaUrl(url);
-		const response = await rawRequest(url, {}, signal);
-		if (response.status >= 300 && response.status < 400 && response.location) {
+		const response = await download(url, {});
+		if (isRedirect(response.status) && response.location) {
 			url = new URL(response.location, url).href;
 			continue;
 		}
@@ -87,48 +84,14 @@ export function assertAtlassianMediaUrl(value: string): void {
 		throw new Error(`The attachment download was redirected to an unexpected address: ${host}`);
 }
 
-function rawRequest(
+/** A GET over HTTPS with the size cap; redirects come back unfollowed. */
+async function download(
 	url: string,
 	headers: Record<string, string>,
-	signal: AbortSignal | undefined,
-): Promise<RawResponse> {
-	if (new URL(url).protocol !== "https:") throw new Error("Attachment downloads require HTTPS");
-	return new Promise((resolve, reject) => {
-		const outgoing = request(
-			url,
-			{ method: "GET", headers, ...(signal ? { signal } : {}) },
-			(incoming) => {
-				const status = incoming.statusCode ?? 0;
-				const location = incoming.headers.location;
-				if (status >= 300 && status < 400) {
-					incoming.destroy();
-					resolve({ status, location, body: new Uint8Array() });
-					return;
-				}
-				const chunks: Buffer[] = [];
-				let size = 0;
-				incoming.on("data", (chunk: Buffer) => {
-					size += chunk.length;
-					if (size > MAX_ATTACHMENT_BYTES) {
-						incoming.destroy();
-						reject(new Error("The attachment is larger than 100 MB."));
-						return;
-					}
-					chunks.push(chunk);
-				});
-				incoming.on("error", reject);
-				incoming.on("end", () =>
-					resolve({ status, location, body: Uint8Array.from(Buffer.concat(chunks)) }),
-				);
-			},
-		);
-		outgoing.on("error", reject);
-		outgoing.end();
-	});
-}
-
-function headersOf(headers: RequestInit["headers"]): Record<string, string> {
-	return Object.fromEntries(new Headers(headers));
+	signal?: AbortSignal | null,
+): Promise<{ status: number; location: string | undefined; body: Uint8Array }> {
+	const response = await nodeRequest(url, { headers, signal, maxBytes: MAX_ATTACHMENT_BYTES });
+	return { ...response, body: Uint8Array.from(response.body) };
 }
 
 function jsonResponse(status: number) {

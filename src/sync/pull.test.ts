@@ -3,14 +3,9 @@ import { parseMarkdownToADF } from "@markdown-confluence/lib";
 import { MERGE_FORMAT, adfToMergeMarkdown } from "./adfMarkdown";
 import type { ConfluenceRemote, RemoteChild, RemotePage } from "./confluenceRemote";
 import { HAS_CONFLICTS, NEEDS_PULL, checkBeforePublish } from "./publishGate";
-import {
-	PullService,
-	isFolderNote,
-	isGeneratedFolderPage,
-	toNoteName,
-	type PullVault,
-} from "./pull";
+import { PullService, isFolderNote, isGeneratedFolderPage, type PullVault } from "./pull";
 import { MediaSync, safeFileName } from "./media";
+import { toNoteName } from "./names";
 import type { SyncBase, SyncStateStore } from "./syncState";
 
 const BASE_URL = "https://example.atlassian.net";
@@ -37,7 +32,7 @@ function fakeRemote(pages: RemotePage[], children: Record<string, RemoteChild[]>
 			new Map(
 				ids.flatMap((id) => {
 					const page = byId.get(id);
-					return page ? [[id, { version: page.version, authorId: page.authorId }] as const] : [];
+					return page ? [[id, { version: page.version }] as const] : [];
 				}),
 			),
 		listChildren: async (id) => children[id] ?? [],
@@ -52,7 +47,6 @@ function page(id: string, markdown: string, version: number, extra: Partial<Remo
 		version,
 		authorId: "someone",
 		adf: adf(markdown),
-		parentId: undefined,
 		...extra,
 	};
 }
@@ -483,4 +477,28 @@ test("names downloaded files safely and without overwriting", () => {
 	});
 	expect(safeFileName("no extension", "1")).toEqual({ name: "no extension", extension: "" });
 	expect(safeFileName("weird.ex$e", "1")).toEqual({ name: "weird.ex$e", extension: "" });
+});
+
+test("records published pages as pull bases, skipping unchanged pages already recorded", async () => {
+	const { vault } = fakeVault({ "A.md": '---\nconnie-page-id: "1"\n---\nText.\n' });
+	const { store, bases } = fakeState([base("2", "Old.\n", 1)]);
+	const pages = fakeRemote([page("1", "Text.\n", 4), page("2", "Changed.\n", 2)]);
+	const remote: ConfluenceRemote = {
+		...pages,
+		getPage: async (id) => {
+			if (id === "3") throw new Error("Forbidden");
+			return pages.getPage(id);
+		},
+	};
+	const failures = await new PullService(remote, vault, store).recordPublished(
+		[
+			{ pageId: "1", unchanged: false },
+			{ pageId: "2", unchanged: true },
+			{ pageId: "3", unchanged: false },
+		],
+		OPTIONS,
+	);
+	expect(bases.get("1")).toMatchObject({ version: 4, markdown: "Text.\n", format: MERGE_FORMAT });
+	expect(bases.get("2")?.version).toBe(1);
+	expect(failures).toEqual([{ pageId: "3", reason: "Forbidden" }]);
 });

@@ -1,4 +1,6 @@
-import { linkTextFor } from "./pageLinks";
+import { errorMessage } from "../errors";
+import { baseName } from "../paths";
+import { createLinkTextIndex } from "./pageLinks";
 import { toNoteName } from "./names";
 
 export interface RemoteAttachment {
@@ -40,9 +42,11 @@ const PUBLISHED_ATTACHMENT = /^[0-9a-f]{32}-(.+)$/;
 export class MediaSync {
 	private map: Record<string, string> | undefined;
 	private readonly attachments = new Map<string, Promise<RemoteAttachment[]>>();
+	/** Vault files by name and their link text; rebuilt after this class writes a file. */
+	private files: { linkText: (path: string) => string; byName: Map<string, string[]> } | undefined;
 
 	constructor(
-		private readonly remote: MediaRemote | undefined,
+		private readonly remote: MediaRemote,
 		private readonly vault: MediaVault,
 		private readonly store: MediaMapStore,
 		private readonly folder: string,
@@ -51,10 +55,10 @@ export class MediaSync {
 	/** Embed text for files that exist in the vault. Call `ensure` first for new pages. */
 	resolver(): MediaResolver {
 		const map = this.map ?? {};
-		const files = this.vault.filePaths();
+		const { linkText } = this.fileIndex();
 		return (fileId) => {
 			const path = map[fileId];
-			return path && this.vault.exists(path) ? linkTextFor(path, files) : undefined;
+			return path && this.vault.exists(path) ? linkText(path) : undefined;
 		};
 	}
 
@@ -70,7 +74,7 @@ export class MediaSync {
 		for (const { fileId, pageId } of mediaReferences(adf)) {
 			const known = map[fileId];
 			if (known && this.vault.exists(known)) continue;
-			if (!this.remote || !pageId) continue;
+			if (!pageId) continue;
 			try {
 				const attachment = (await this.listAttachments(pageId)).find(
 					(entry) => entry.fileId === fileId,
@@ -87,10 +91,11 @@ export class MediaSync {
 				const data = await this.remote.downloadAttachment(pageId, attachment.id);
 				const path = this.availablePath(attachment.title, attachment.id);
 				await this.vault.writeBinary(path, data);
+				this.files = undefined;
 				map[fileId] = path;
 				changed = true;
 			} catch (error) {
-				errors.push(error instanceof Error ? error.message : String(error));
+				errors.push(errorMessage(error));
 			}
 		}
 		if (changed) await this.store.setMedia(map);
@@ -105,17 +110,28 @@ export class MediaSync {
 	private listAttachments(pageId: string) {
 		let pending = this.attachments.get(pageId);
 		if (!pending) {
-			pending = this.remote!.listAttachments(pageId);
+			pending = this.remote.listAttachments(pageId);
 			this.attachments.set(pageId, pending);
 		}
 		return pending;
 	}
 
 	private findFileNamed(name: string): string | undefined {
-		const matches = this.vault
-			.filePaths()
-			.filter((path) => path.slice(path.lastIndexOf("/") + 1) === name);
-		return matches.length === 1 ? matches[0] : undefined;
+		const matches = this.fileIndex().byName.get(name);
+		return matches?.length === 1 ? matches[0] : undefined;
+	}
+
+	private fileIndex() {
+		if (!this.files) {
+			const paths = this.vault.filePaths();
+			const byName = new Map<string, string[]>();
+			for (const path of paths) {
+				const name = baseName(path);
+				byName.set(name, [...(byName.get(name) ?? []), path]);
+			}
+			this.files = { linkText: createLinkTextIndex(paths), byName };
+		}
+		return this.files;
 	}
 
 	/** A safe, unused path in the image folder, keeping the attachment's file name. */

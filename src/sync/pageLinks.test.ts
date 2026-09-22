@@ -1,5 +1,10 @@
 import { expect, test } from "@effect/vitest";
-import { createPageLinkResolver, linkTextFor, pageLinkTarget, rewritePageLinks } from "./pageLinks";
+import {
+	createLinkTextIndex,
+	createPageLinkResolver,
+	pageLinkTarget,
+	rewritePageLinks,
+} from "./pageLinks";
 
 const SITE = "https://example.atlassian.net";
 const url = (id: string, title = "Page") => `${SITE}/wiki/spaces/IT/pages/${id}/${title}`;
@@ -24,7 +29,9 @@ test("turns links to pages with notes into wikilinks", () => {
 
 test("uses the vault path when two notes share a name", () => {
 	expect(rewrite(`[Onboarding](${url("2")})`).markdown).toBe("[[Docs/Team/Onboarding|Onboarding]]");
-	expect(linkTextFor("Docs/Team/Onboarding.md", ["Docs/Team/Onboarding.md"])).toBe("Onboarding");
+	expect(createLinkTextIndex(["Docs/Team/Onboarding.md"])("Docs/Team/Onboarding.md")).toBe(
+		"Onboarding",
+	);
 });
 
 test("turns smart links and relative links into wikilinks", () => {

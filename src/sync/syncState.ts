@@ -35,34 +35,25 @@ export function createSyncStateStore(adapter: DataAdapter, directory: string): S
 		if (!PAGE_ID.test(pageId)) throw new Error(`Invalid Confluence page ID: ${pageId}`);
 		return `${directory}/${pageId}.json`;
 	};
+	/** Parsed JSON from a file in the directory, or undefined if it's missing or unreadable. */
+	const readJson = async (path: string): Promise<unknown> => {
+		try {
+			return JSON.parse(await adapter.read(path)) as unknown;
+		} catch {
+			return undefined;
+		}
+	};
+	let directoryExists = false;
+	const write = async (path: string, value: unknown) => {
+		if (!directoryExists && !(await adapter.exists(directory))) await adapter.mkdir(directory);
+		directoryExists = true;
+		await adapter.write(path, JSON.stringify(value));
+	};
 	return {
-		async get(pageId) {
-			const path = pathFor(pageId);
-			if (!(await adapter.exists(path))) return undefined;
-			try {
-				return parseBase(JSON.parse(await adapter.read(path)), pageId);
-			} catch {
-				return undefined;
-			}
-		},
-		async getMedia() {
-			const path = `${directory}/media.json`;
-			if (!(await adapter.exists(path))) return {};
-			try {
-				return parseMediaMap(JSON.parse(await adapter.read(path)));
-			} catch {
-				return {};
-			}
-		},
-		async setMedia(map) {
-			if (!(await adapter.exists(directory))) await adapter.mkdir(directory);
-			await adapter.write(`${directory}/media.json`, JSON.stringify(map));
-		},
-		async set(base) {
-			const path = pathFor(base.pageId);
-			if (!(await adapter.exists(directory))) await adapter.mkdir(directory);
-			await adapter.write(path, JSON.stringify(base));
-		},
+		get: async (pageId) => parseBase(await readJson(pathFor(pageId)), pageId),
+		set: (base) => write(pathFor(base.pageId), base),
+		getMedia: async () => parseMediaMap(await readJson(`${directory}/media.json`)),
+		setMedia: (map) => write(`${directory}/media.json`, map),
 	};
 }
 

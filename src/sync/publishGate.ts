@@ -34,25 +34,24 @@ export async function checkBeforePublish(
 ): Promise<PublishCheck> {
 	const blocked: PublishCheck["blocked"] = [];
 	const upToDate = new Set<string>();
-	const bases = new Map<string, number>();
+	const linked: { path: string; pageId: string }[] = [];
 	for (const note of notes) {
-		if (hasConflictMarkers(note.text)) {
-			blocked.push({ fileName: note.path, reason: HAS_CONFLICTS });
-			continue;
-		}
-		if (!note.pageId) continue;
-		const base = await state.get(note.pageId);
-		if (base) bases.set(note.path, base.version);
+		if (hasConflictMarkers(note.text)) blocked.push({ fileName: note.path, reason: HAS_CONFLICTS });
+		else if (note.pageId) linked.push({ path: note.path, pageId: note.pageId });
 	}
 
-	const linked = notes.filter((note) => note.pageId && bases.has(note.path));
-	const versions = await remote.getVersions(linked.map((note) => note.pageId!));
-	for (const note of linked) {
-		const remoteVersion = versions.get(note.pageId!)?.version;
-		const baseVersion = bases.get(note.path)!;
+	// Snapshots are local files, so they can all be read at once.
+	const bases = await Promise.all(linked.map((note) => state.get(note.pageId)));
+	const withBase = linked.flatMap((note, index) => {
+		const base = bases[index];
+		return base ? [{ ...note, baseVersion: base.version }] : [];
+	});
+	const versions = await remote.getVersions(withBase.map((note) => note.pageId));
+	for (const { path, pageId, baseVersion } of withBase) {
+		const remoteVersion = versions.get(pageId)?.version;
 		if (remoteVersion === undefined) continue;
-		if (remoteVersion > baseVersion) blocked.push({ fileName: note.path, reason: NEEDS_PULL });
-		else if (remoteVersion === baseVersion) upToDate.add(note.path);
+		if (remoteVersion > baseVersion) blocked.push({ fileName: path, reason: NEEDS_PULL });
+		else if (remoteVersion === baseVersion) upToDate.add(path);
 	}
 	return { blocked, upToDate };
 }
