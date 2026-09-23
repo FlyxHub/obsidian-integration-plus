@@ -2,6 +2,14 @@
 
 All notable changes to Confluence Integration Plus are listed here. For the history of the plugin this one was forked from, see the [markdown-confluence changelog](https://github.com/markdown-confluence/markdown-confluence/blob/main/CHANGELOG.md).
 
+## 1.2.0 (unreleased)
+
+### Changes
+
+- In Obsidian 1.13 and later, the plugin's settings appear in Obsidian's settings search.
+- The plugin is less than half its previous size, about 4 MB instead of 9 MB, so Obsidian Sync Standard can sync it. Mermaid diagrams are now rendered with the Mermaid version that Obsidian uses for your notes, instead of a separate copy.
+- Release files come with GitHub artifact attestations, so you can verify that they were built from this repository.
+
 ## 1.1.3 (2026-09-23)
 
 ### Changes

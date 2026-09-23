@@ -49,10 +49,10 @@ class OAuthNetworkError extends Error {}
 export function waitForOAuth(milliseconds: number, signal: AbortSignal): Promise<void> {
 	return new Promise((resolve, reject) => {
 		const abort = () => {
-			clearTimeout(timer);
+			window.clearTimeout(timer);
 			reject(new Error("Login cancelled"));
 		};
-		const timer = setTimeout(() => {
+		const timer = window.setTimeout(() => {
 			signal.removeEventListener("abort", abort);
 			resolve();
 		}, milliseconds);

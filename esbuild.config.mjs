@@ -10,6 +10,37 @@ if you want to view the source, please visit the github repository of this plugi
 
 const prod = process.argv[2] === "production";
 
+/**
+ * Leave out library code the plugin never runs, so main.js stays small enough for Obsidian
+ * Sync's 5 MB limit.
+ */
+const slimDependencies = {
+	name: "slim-dependencies",
+	setup(build) {
+		// The lib uses only NodeFileSystem and NodePath, but the package index also brings in
+		// the undici HTTP client, which needs node:sqlite.
+		build.onResolve({ filter: /^@effect\/platform-node$/ }, (args) => ({
+			path: args.path,
+			namespace: "slim-platform-node",
+		}));
+		build.onLoad({ filter: /.*/, namespace: "slim-platform-node" }, () => ({
+			contents: [
+				'export * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";',
+				'export * as NodePath from "@effect/platform-node/NodePath";',
+			].join("\n"),
+			resolveDir: process.cwd(),
+			loader: "js",
+		}));
+		// The lib renders math with MathJax's TeX font, so MathJax's default font is never used.
+		build.onResolve({ filter: /^#default-font\/svg\/default\.js$/ }, (args) =>
+			build.resolve("@mathjax/mathjax-tex-font/js/svg/default.js", {
+				kind: args.kind,
+				resolveDir: args.resolveDir,
+			}),
+		);
+	},
+};
+
 const context = await esbuild.context({
 	banner: {
 		js: banner,
@@ -32,6 +63,11 @@ const context = await esbuild.context({
 		"@lezer/lr",
 		...builtinModules,
 		...builtinModules.map((name) => `node:${name}`),
+		// Built-ins that exist only with the node: prefix, which builtinModules may leave out.
+		"node:sea",
+		"node:sqlite",
+		"node:test",
+		"node:test/reporters",
 	],
 	format: "cjs",
 	platform: "browser",
@@ -45,6 +81,7 @@ const context = await esbuild.context({
 	},
 	// Obsidian loads main.js from the plugin folder; main.js is gitignored and shipped only in releases.
 	outfile: "main.js",
+	plugins: [slimDependencies],
 });
 
 if (prod) {

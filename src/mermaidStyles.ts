@@ -10,8 +10,10 @@ export interface MermaidStyles {
 	bodyStyles: string;
 }
 
-/** Obsidian's bundled Mermaid; only the part used to copy the user's diagram config. */
-interface ObsidianMermaid {
+/** The parts of Obsidian's bundled Mermaid that publishing uses. */
+export interface ObsidianMermaid {
+	initialize(config: MermaidConfig): void;
+	render(id: string, text: string): Promise<{ svg: string }>;
 	mermaidAPI: { getConfig(): MermaidConfig };
 }
 
