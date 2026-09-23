@@ -2,7 +2,7 @@
 
 All notable changes to Confluence Integration Plus are listed here. For the history of the plugin this one was forked from, see the [markdown-confluence changelog](https://github.com/markdown-confluence/markdown-confluence/blob/main/CHANGELOG.md).
 
-## 1.2.0 (unreleased)
+## 1.2.0 (2026-09-23)
 
 ### Changes
 
