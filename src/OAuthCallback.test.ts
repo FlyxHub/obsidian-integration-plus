@@ -1,7 +1,10 @@
 import { createServer, request } from "node:http";
-import { expect, test } from "@effect/vitest";
+import { expect, test, vi } from "@effect/vitest";
 import { oauthCallbackUrl, receiveOAuthCode } from "./OAuthCallback";
 import { AtlassianOAuth } from "./AtlassianOAuth";
+
+// The code uses window timers, as Obsidian requires; tests run under plain Node.
+vi.stubGlobal("window", { setTimeout, clearTimeout });
 
 async function unusedCallback() {
 	const server = createServer();

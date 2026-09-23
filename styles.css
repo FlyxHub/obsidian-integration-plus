@@ -2,6 +2,16 @@
 	cursor: var(--cursor);
 }
 
+/* Rows in the settings tab that hold their own content instead of a setting's controls. */
+.setting-item.confluence-settings-validation,
+.setting-item.confluence-settings-note {
+	display: block;
+}
+
+.setting-item.confluence-settings-validation:empty {
+	display: none;
+}
+
 .confluence-settings-validation:not(:empty) {
 	color: var(--text-error);
 	padding-bottom: var(--size-4-2);

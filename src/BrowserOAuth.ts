@@ -35,7 +35,7 @@ export class BrowserOAuth {
 	status = "";
 	constructor(
 		private readonly settings: () => BrowserOAuthSettings,
-		private readonly storage: () => SecretStorage,
+		private readonly storage: () => Pick<SecretStorage, "getSecret" | "setSecret">,
 		private readonly save: () => Promise<void>,
 		private readonly openUrl: (url: string) => void,
 		dependencies: OAuthDependencies = {},

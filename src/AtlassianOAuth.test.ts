@@ -1,5 +1,8 @@
 import { expect, test, vi } from "@effect/vitest";
 import { AtlassianOAuth, waitForOAuth } from "./AtlassianOAuth";
+
+// The code uses window timers, as Obsidian requires; tests run under plain Node.
+vi.stubGlobal("window", { setTimeout, clearTimeout });
 const respond = (data: unknown, status = 200) => ({
 	ok: status === 200,
 	status,

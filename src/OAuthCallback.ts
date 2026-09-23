@@ -34,7 +34,7 @@ export function receiveOAuthCode(
 		const finish = (error?: Error, code?: string) => {
 			if (finished) return;
 			finished = true;
-			clearTimeout(timer);
+			window.clearTimeout(timer);
 			signal.removeEventListener("abort", abort);
 			server.close();
 			server.closeAllConnections();
@@ -99,7 +99,7 @@ export function receiveOAuthCode(
 		});
 		server.requestTimeout = 10000;
 		server.headersTimeout = 10000;
-		const timer = setTimeout(
+		const timer = window.setTimeout(
 			() => finish(new Error("Login timed out. Please try again.")),
 			lifetimeMs,
 		);

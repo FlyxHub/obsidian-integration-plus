@@ -20,10 +20,6 @@ import {
 	validateConfluenceSettings,
 } from "@markdown-confluence/lib";
 import { Effect, Layer } from "effect";
-import {
-	ElectronMathRenderer,
-	ElectronMermaidRenderer,
-} from "@markdown-confluence/mermaid-electron-renderer";
 import { HttpPlantumlRenderer } from "@markdown-confluence/plantuml-renderer";
 import { BrowserOAuth } from "./BrowserOAuth";
 import { normalizeCalloutsForPublish } from "./callouts";
@@ -35,6 +31,7 @@ import {
 import { ConfluenceSettingTab } from "./ConfluenceSettingTab";
 import { createDataviewTransformer } from "./DataviewTransformer";
 import { desktopFetch } from "./desktopFetch";
+import { ElectronMathRenderer, ElectronMermaidRenderer } from "./electronRenderers";
 import { ObsidianPlatformLive } from "./effects/ObsidianPlatform";
 import { errorMessage, toError } from "./errors";
 import { PUBLISH_KEY } from "./frontmatterKeys";
@@ -86,7 +83,7 @@ type ConfluenceClient = Awaited<ReturnType<ConfluencePlugin["authenticationClien
 type PublishScope = { note: string } | "changes" | "all";
 
 export default class ConfluencePlugin extends Plugin {
-	settings!: ObsidianPluginSettings;
+	declare settings: ObsidianPluginSettings;
 	/** Set while a publish or pull runs; aborting it cancels after the current request. */
 	private syncAbort: AbortController | undefined;
 	private syncStatus: HTMLElement | undefined;

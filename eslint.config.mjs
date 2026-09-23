@@ -42,15 +42,6 @@ export default defineConfig([
 			],
 			// isDesktopOnly is true: the OAuth loopback server and HTTPS transport need Node.
 			"obsidianmd/no-nodejs-modules": "off",
-			// Declarative settings need Obsidian 1.13.0; minAppVersion is 1.11.4.
-			"obsidianmd/settings-tab/prefer-setting-definitions": "off",
-		},
-	},
-	{
-		// Node-side networking code with no window; tests run it under plain Node.
-		files: ["src/AtlassianOAuth.ts", "src/OAuthCallback.ts"],
-		rules: {
-			"obsidianmd/prefer-window-timers": "off",
 		},
 	},
 	{

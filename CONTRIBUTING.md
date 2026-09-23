@@ -161,6 +161,8 @@ The plugin loads settings and registers commands at startup. It shouldn't take n
 
 A release is a GitHub release whose tag matches the version in `manifest.json` exactly, without a `v` prefix. Obsidian downloads `main.js`, `manifest.json`, and `styles.css` from the release assets.
 
+GitHub Actions builds and publishes each release. When you push a version tag, the `Release` workflow (`.github/workflows/release.yml`) checks that the tag matches `manifest.json`, runs the linter and the tests, builds `main.js`, creates [artifact attestations](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations/using-artifact-attestations-to-establish-provenance-for-builds) for the three files, and creates the GitHub release with the version's changelog section as its notes. Don't upload release files by hand: files that the workflow didn't build have no attestation.
+
 ### Before you begin
 
 - Merge the changes that you want to release into `main`.
@@ -188,33 +190,15 @@ A release is a GitHub release whose tag matches the version in `manifest.json` e
 
    Replace `VERSION` with the version in `manifest.json`, such as `1.2.0`. The tag has no `v` prefix.
 
-1. Build the production files:
-
-   ```bash
-   npm run build
-   ```
-
 1. Push the commit and the tag:
 
    ```bash
    git push --follow-tags
    ```
 
-1. On GitHub, create the release:
-   1. Go to the repository's **Releases** page, and then click **Draft a new release**.
-   1. In **Choose a tag**, select the tag that you created.
-   1. Set the release title to the version number.
-   1. In the description, summarize the changes. If the release raises `minAppVersion`, or changes settings or credential storage, say so.
-   1. Attach `main.js`, `manifest.json`, and `styles.css` as binary files.
-   1. Click **Publish release**.
+1. On the repository's **Actions** page, wait for the **Release** workflow to finish, and then check the new release on the **Releases** page. If the release raises `minAppVersion`, or changes settings or credential storage, make sure its changelog section says so.
 
-   If you use the [GitHub CLI](https://cli.github.com/), you can do this step with one command instead:
-
-   ```bash
-   gh release create VERSION main.js manifest.json styles.css --title VERSION --notes "RELEASE_NOTES"
-   ```
-
-   Replace `VERSION` with the new version, such as `1.2.0`, and `RELEASE_NOTES` with a summary of the changes.
+   To verify a downloaded file's attestation, run `gh attestation verify main.js --repo FlyxHub/obsidian-integration-plus`.
 
 1. Install the release in a clean test vault by following [Install the plugin](README.md#install-the-plugin), and verify that it loads.
 
