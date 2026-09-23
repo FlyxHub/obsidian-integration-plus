@@ -35,7 +35,7 @@ export class BrowserOAuth {
 	status = "";
 	constructor(
 		private readonly settings: () => BrowserOAuthSettings,
-		private readonly storage: () => SecretStorage | undefined,
+		private readonly storage: () => SecretStorage,
 		private readonly save: () => Promise<void>,
 		private readonly openUrl: (url: string) => void,
 		dependencies: OAuthDependencies = {},
@@ -61,22 +61,15 @@ export class BrowserOAuth {
 
 	private clientSecret() {
 		const id = this.settings().oauthClientSecretId;
-		return id ? this.storage()?.getSecret(id) || undefined : undefined;
+		return id ? this.storage().getSecret(id) || undefined : undefined;
 	}
 	async saveClientSecret(value: string) {
 		if (this.pending || this.connected)
 			throw new Error("Disconnect before changing OAuth app credentials.");
-		const storage = this.requireStorage();
 		if (!this.settings().oauthClientSecretId)
 			this.settings().oauthClientSecretId = `confluence-oauth-client-${randomUUID()}`;
-		storage.setSecret(this.settings().oauthClientSecretId, value.trim());
+		this.storage().setSecret(this.settings().oauthClientSecretId, value.trim());
 		await this.save();
-	}
-	private requireStorage() {
-		const storage = this.storage();
-		if (!storage)
-			throw new Error("OAuth login requires Obsidian 1.11.4 or later with secret storage.");
-		return storage;
 	}
 	private configuration() {
 		const settings = this.settings();
@@ -96,7 +89,7 @@ export class BrowserOAuth {
 	}
 	private read(): StoredTokens | undefined {
 		const id = this.settings().oauthSecretId;
-		const value = id && this.storage()?.getSecret(id);
+		const value = id && this.storage().getSecret(id);
 		if (!value) return undefined;
 		let parsed: StoredTokens;
 		try {
@@ -120,20 +113,21 @@ export class BrowserOAuth {
 			throw new Error("Connection changed. Please try again.");
 	}
 	private async store(tokens: OAuthTokens, configuration: string, generation: number) {
-		const storage = this.requireStorage();
 		if (!this.settings().oauthSecretId) {
 			this.settings().oauthSecretId = `confluence-oauth-${randomUUID()}`;
 			await this.save();
 		}
 		this.checkConnection(generation, configuration);
-		storage.setSecret(this.settings().oauthSecretId, JSON.stringify({ ...tokens, configuration }));
+		this.storage().setSecret(
+			this.settings().oauthSecretId,
+			JSON.stringify({ ...tokens, configuration }),
+		);
 	}
 	openBrowser() {
 		if (this.pending && this.authorizationUrl) this.openUrl(this.authorizationUrl);
 	}
 	async connect(onChange: () => void = () => {}) {
 		if (this.pending) return;
-		this.requireStorage();
 		const configuration = this.configuration();
 		const credentials = this.credentials();
 		this.cancel();
@@ -202,7 +196,7 @@ export class BrowserOAuth {
 	async disconnect() {
 		this.cancel();
 		const settings = this.settings();
-		if (settings.oauthSecretId) this.storage()?.setSecret(settings.oauthSecretId, "");
+		if (settings.oauthSecretId) this.storage().setSecret(settings.oauthSecretId, "");
 		settings.oauthSites = [];
 		settings.oauthSiteId = "";
 		this.status = "Disconnected";

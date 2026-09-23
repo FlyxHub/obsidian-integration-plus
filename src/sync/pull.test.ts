@@ -3,8 +3,12 @@ import { parseMarkdownToADF } from "@markdown-confluence/lib";
 import { MERGE_FORMAT, adfToMergeMarkdown } from "./adfMarkdown";
 import type { ConfluenceRemote, RemoteChild, RemotePage } from "./confluenceRemote";
 import { HAS_CONFLICTS, NEEDS_PULL, checkBeforePublish, findChangedNotes } from "./publishGate";
-import { PullService, isFolderNote, isGeneratedFolderPage, type PullVault } from "./pull";
+import { isFolderNote } from "./partialPublish";
+import { PullService, isGeneratedFolderPage, type PullVault } from "./pull";
 import { MediaSync, safeFileName } from "./media";
+
+/** Pull without attachments: nothing is downloaded and no media has a local copy. */
+const NO_MEDIA = { ensure: async () => [], resolver: () => () => undefined };
 import { toNoteName } from "./names";
 import type { SyncBase, SyncStateStore } from "./syncState";
 
@@ -111,7 +115,7 @@ test("pull merges a Confluence edit into the note and keeps frontmatter and loca
 	const { store, bases } = fakeState([base("1", published, 3)]);
 	const remote = fakeRemote([page("1", "Intro.\n\nOutro, edited.\n", 4)]);
 
-	const report = await new PullService(remote, vault, store).pull(OPTIONS);
+	const report = await new PullService(remote, vault, store, NO_MEDIA).pull(OPTIONS);
 
 	expect(report.updated).toEqual(["Docs/Note.md"]);
 	expect(files["Docs/Note.md"]).toBe(
@@ -124,7 +128,7 @@ test("pull skips pages whose version matches the base", async () => {
 	const { vault } = fakeVault({ "A.md": '---\nconnie-page-id: "1"\n---\nText.\n' });
 	const { store } = fakeState([base("1", "Text.\n", 2)]);
 	const remote = fakeRemote([page("1", "Text.\n", 2)]);
-	const report = await new PullService(remote, vault, store).pull(OPTIONS);
+	const report = await new PullService(remote, vault, store, NO_MEDIA).pull(OPTIONS);
 	expect(report.unchanged).toBe(1);
 	expect(report.updated).toEqual([]);
 });
@@ -133,7 +137,7 @@ test("pull writes conflict markers when both sides changed the same block", asyn
 	const { vault, files } = fakeVault({ "A.md": '---\nconnie-page-id: "1"\n---\nLocal.\n' });
 	const { store, bases } = fakeState([base("1", "Original.\n", 1)]);
 	const remote = fakeRemote([page("1", "Remote.\n", 2)]);
-	const report = await new PullService(remote, vault, store).pull(OPTIONS);
+	const report = await new PullService(remote, vault, store, NO_MEDIA).pull(OPTIONS);
 	expect(report.conflicted).toEqual(["A.md"]);
 	expect(files["A.md"]).toContain("<<<<<<< Obsidian\nLocal.\n=======\nRemote.\n>>>>>>> Confluence");
 	expect(bases.get("1")?.version).toBe(2);
@@ -144,7 +148,12 @@ test("pull refuses notes that still have conflict markers", async () => {
 		'---\nconnie-page-id: "1"\n---\n<<<<<<< Obsidian\na\n=======\nb\n>>>>>>> Confluence\n';
 	const { vault, files } = fakeVault({ "A.md": text });
 	const { store } = fakeState([base("1", "x\n", 1)]);
-	const report = await new PullService(fakeRemote([page("1", "y\n", 2)]), vault, store).pull({
+	const report = await new PullService(
+		fakeRemote([page("1", "y\n", 2)]),
+		vault,
+		store,
+		NO_MEDIA,
+	).pull({
 		...OPTIONS,
 	});
 	expect(report.skipped[0]?.reason).toMatch(/conflict markers/);
@@ -156,7 +165,7 @@ test("pull with no base records our own last publish without changing the note",
 	const { vault, files } = fakeVault({ "A.md": note });
 	const { store, bases } = fakeState();
 	const remote = fakeRemote([page("1", "Published text.\n", 5, { authorId: ME })]);
-	const report = await new PullService(remote, vault, store).pull(OPTIONS);
+	const report = await new PullService(remote, vault, store, NO_MEDIA).pull(OPTIONS);
 	expect(files["A.md"]).toBe(note);
 	expect(report.unchanged).toBe(1);
 	expect(bases.get("1")?.version).toBe(5);
@@ -165,7 +174,12 @@ test("pull with no base records our own last publish without changing the note",
 test("pull with no base marks every difference when another user edited the page", async () => {
 	const { vault, files } = fakeVault({ "A.md": '---\nconnie-page-id: "1"\n---\nMine.\n' });
 	const { store } = fakeState();
-	const report = await new PullService(fakeRemote([page("1", "Theirs.\n", 2)]), vault, store).pull({
+	const report = await new PullService(
+		fakeRemote([page("1", "Theirs.\n", 2)]),
+		vault,
+		store,
+		NO_MEDIA,
+	).pull({
 		...OPTIONS,
 	});
 	expect(report.conflicted).toEqual(["A.md"]);
@@ -176,14 +190,14 @@ test("pull records a Confluence title change in connie-title", async () => {
 	const { vault, frontmatter } = fakeVault({ "A.md": '---\nconnie-page-id: "1"\n---\nText.\n' });
 	const { store } = fakeState([base("1", "Text.\n", 1)]);
 	const remote = fakeRemote([page("1", "Text.\n", 2, { title: "Renamed" })]);
-	const report = await new PullService(remote, vault, store).pull(OPTIONS);
+	const report = await new PullService(remote, vault, store, NO_MEDIA).pull(OPTIONS);
 	expect(report.renamed).toEqual([{ path: "A.md", title: "Renamed" }]);
 	expect(frontmatter.get("A.md")).toEqual({ "connie-title": "Renamed" });
 });
 
 test("pull reports notes whose page was deleted", async () => {
 	const { vault } = fakeVault({ "A.md": '---\nconnie-page-id: "9"\n---\nText.\n' });
-	const report = await new PullService(fakeRemote([]), vault, fakeState().store).pull({
+	const report = await new PullService(fakeRemote([]), vault, fakeState().store, NO_MEDIA).pull({
 		...OPTIONS,
 	});
 	expect(report.deleted).toEqual(["A.md"]);
@@ -214,7 +228,7 @@ test("import creates notes and folders for new pages, and skips generated folder
 			"14": [{ id: "15", title: "Child" }],
 		},
 	);
-	const report = await new PullService(remote, vault, store).pull({
+	const report = await new PullService(remote, vault, store, NO_MEDIA).pull({
 		...OPTIONS,
 		importUnder: { rootPageId: "root", rootFolder: "Fallback" },
 	});
@@ -256,6 +270,7 @@ test("import skips children of a regular note and never overwrites an existing n
 		remote,
 		vault,
 		fakeState([base("20", "Leaf.\n", 1)]).store,
+		NO_MEDIA,
 	).pull({
 		...OPTIONS,
 		importUnder: { rootPageId: "root", rootFolder: "Docs" },
@@ -322,7 +337,7 @@ test("pull reformats notes whose snapshot came from an older converter, without 
 		},
 	]);
 	const remote = fakeRemote([page("1", "Intro.\n\n> [!warning] Careful.\n", 3)]);
-	const report = await new PullService(remote, vault, store).pull(OPTIONS);
+	const report = await new PullService(remote, vault, store, NO_MEDIA).pull(OPTIONS);
 	expect(report.updated).toEqual(["A.md"]);
 	expect(files["A.md"]).toBe('---\nconnie-page-id: "1"\n---\nIntro.\n\n> [!warning]\n> Careful.\n');
 	expect(bases.get("1")?.format).toBe(MERGE_FORMAT);
@@ -349,7 +364,7 @@ test("imported pages link to each other and to existing notes as wikilinks", asy
 			],
 		},
 	);
-	await new PullService(remote, vault, fakeState([base("10", "Text.\n", 1)]).store).pull({
+	await new PullService(remote, vault, fakeState([base("10", "Text.\n", 1)]).store, NO_MEDIA).pull({
 		...OPTIONS,
 		importUnder: { rootPageId: "root", rootFolder: "Docs" },
 	});
@@ -365,7 +380,7 @@ test("a note is converted again once a page it links to gets a note", async () =
 		{ ...base("1", `See ${link}.\n`, 2), unresolvedLinks: ["20"] },
 	]);
 	const remote = fakeRemote([page("1", `See ${link}.\n`, 2)]);
-	const service = new PullService(remote, vault, store);
+	const service = new PullService(remote, vault, store, NO_MEDIA);
 
 	await service.pull(OPTIONS);
 	expect(files["A.md"]).toBe(note);
@@ -494,7 +509,7 @@ test("records published pages as pull bases, skipping unchanged pages already re
 			return pages.getPage(id);
 		},
 	};
-	const failures = await new PullService(remote, vault, store).recordPublished(
+	const failures = await new PullService(remote, vault, store, NO_MEDIA).recordPublished(
 		[
 			{ pageId: "1", unchanged: false, fingerprint: "one" },
 			{ pageId: "2", unchanged: true, fingerprint: "two" },
@@ -519,7 +534,7 @@ test("a note that was in sync stays in sync after a clean pull", async () => {
 		{ ...base("1", "Intro.\n\nOutro.\n", 3), localFingerprint: fingerprintOf(note) },
 	]);
 	const remote = fakeRemote([page("1", "Intro.\n\nOutro, edited.\n", 4)]);
-	await new PullService(remote, vault, store).pull(OPTIONS);
+	await new PullService(remote, vault, store, NO_MEDIA).pull(OPTIONS);
 	expect(files["A.md"]).toContain("Outro, edited.");
 	expect(bases.get("1")?.localFingerprint).toBe(fingerprintOf(files["A.md"]!));
 });
@@ -533,7 +548,7 @@ test("a note with local changes stays marked as changed after a pull", async () 
 		{ ...base("1", "Intro.\n\nOutro.\n", 3), localFingerprint: fingerprintOf(published) },
 	]);
 	const remote = fakeRemote([page("1", "Intro.\n\nOutro, edited.\n", 4)]);
-	await new PullService(remote, vault, store).pull(OPTIONS);
+	await new PullService(remote, vault, store, NO_MEDIA).pull(OPTIONS);
 	expect(files["A.md"]).toContain("Intro, local.");
 	expect(bases.get("1")?.localFingerprint).toBe(fingerprintOf(published));
 });
@@ -544,7 +559,7 @@ test("imported notes start in sync", async () => {
 	const remote = fakeRemote([page("30", "Imported.\n", 1, { title: "New page" })], {
 		root: [{ id: "30", title: "New page" }],
 	});
-	await new PullService(remote, vault, store).pull({
+	await new PullService(remote, vault, store, NO_MEDIA).pull({
 		...OPTIONS,
 		importUnder: { rootPageId: "root", rootFolder: "Docs" },
 	});

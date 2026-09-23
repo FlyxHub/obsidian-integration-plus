@@ -2,6 +2,12 @@
 
 All notable changes to Confluence Integration Plus are listed here. For the history of the plugin this one was forked from, see the [markdown-confluence changelog](https://github.com/markdown-confluence/markdown-confluence/blob/main/CHANGELOG.md).
 
+## 1.1.3 (unreleased)
+
+### Changes
+
+- The plugin is about 230 KB smaller. The publish results and page settings dialogs no longer use React, and they look and work as before.
+
 ## 1.1.2 (2026-09-22)
 
 ### Fixes

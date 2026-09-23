@@ -71,6 +71,13 @@ export function treeRoot(paths: readonly string[]): string {
 	return paths.includes(root) ? parentOf(root) : root;
 }
 
+/** A folder note supplies its folder's page: named like the folder, or index/README. */
+export function isFolderNote(path: string): boolean {
+	const name = baseName(path).replace(/\.md$/, "");
+	const folder = parentOf(path);
+	return folder !== "" && (name === baseName(folder) || FOLDER_NOTE_NAMES.includes(name));
+}
+
 /** The note that supplies a folder's page: named like the folder, or index/README. */
 function folderNoteOf(folder: string, all: ReadonlySet<string>): string | undefined {
 	const prefix = folder ? `${folder}/` : "";

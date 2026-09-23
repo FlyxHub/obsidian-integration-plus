@@ -26,7 +26,7 @@ export interface DeviceAuthorization {
 	verificationUrl: string;
 	expiresAt: number;
 }
-export const confluenceOAuthScopes = [
+const confluenceOAuthScopes = [
 	"offline_access",
 	"read:page:confluence",
 	"write:page:confluence",
@@ -42,7 +42,6 @@ export const confluenceOAuthScopes = [
 	"read:confluence-user",
 ];
 const authOrigin = "https://auth.atlassian.com";
-const tokenUrl = ATLASSIAN_OAUTH_TOKEN_URL;
 const random = () => randomBytes(32).toString("base64url");
 const loginExpired = "Login expired. Please start again.";
 class OAuthNetworkError extends Error {}
@@ -163,7 +162,7 @@ export class AtlassianOAuth {
 		signal?: AbortSignal,
 	) {
 		const response = await this.request(
-			tokenUrl,
+			ATLASSIAN_OAUTH_TOKEN_URL,
 			{
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
@@ -270,7 +269,7 @@ export class AtlassianOAuth {
 			let poll;
 			try {
 				poll = await this.request(
-					tokenUrl,
+					ATLASSIAN_OAUTH_TOKEN_URL,
 					{
 						method: "POST",
 						headers: { "Content-Type": "application/x-www-form-urlencoded" },

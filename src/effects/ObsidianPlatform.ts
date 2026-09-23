@@ -2,7 +2,7 @@ import * as EffectPath from "effect/Path";
 import * as EffectFileSystem from "effect/FileSystem";
 import { Effect, Layer, Option } from "effect";
 import { systemError, type PlatformError } from "effect/PlatformError";
-import { App, normalizePath, TFile, TFolder } from "obsidian";
+import { App, normalizePath, TAbstractFile, TFile, TFolder } from "obsidian";
 import { RuntimeEnvironmentService } from "@markdown-confluence/lib";
 
 export function ObsidianPlatformLive(app: App) {
@@ -33,54 +33,28 @@ const ObsidianPathLive: Layer.Layer<EffectPath.Path> = Layer.effect(EffectPath.P
 
 function ObsidianFileSystemLive(app: App): Layer.Layer<EffectFileSystem.FileSystem> {
 	return EffectFileSystem.layerNoop({
-		access: (path) =>
-			Effect.gen(function* () {
-				const file = getAbstractFile(app, path);
-				if (!file) {
-					return yield* Effect.fail(toNotFound("access", path));
-				}
-			}),
+		access: (path) => Effect.asVoid(find(app, path, "access", TAbstractFile)),
 		exists: (path) => Effect.sync(() => getAbstractFile(app, path) !== null),
 		readDirectory: (path) =>
-			Effect.gen(function* () {
-				const folder = getFolder(app, path);
-				if (!folder) {
-					return yield* Effect.fail(toNotFound("readDirectory", path));
-				}
-
-				return folder.children.map((child) => child.name);
-			}),
+			Effect.map(find(app, path, "readDirectory", TFolder), (folder) =>
+				folder.children.map((child) => child.name),
+			),
 		readFile: (path) =>
-			Effect.gen(function* () {
-				const file = getFile(app, path);
-				if (!file) {
-					return yield* Effect.fail(toNotFound("readFile", path));
-				}
-
-				return yield* Effect.tryPromise({
+			Effect.flatMap(find(app, path, "readFile", TFile), (file) =>
+				Effect.tryPromise({
 					try: async () => new Uint8Array(await app.vault.readBinary(file)),
 					catch: (cause) => toPlatformError("readFile", path, cause),
-				});
-			}),
+				}),
+			),
 		readFileString: (path) =>
-			Effect.gen(function* () {
-				const file = getFile(app, path);
-				if (!file) {
-					return yield* Effect.fail(toNotFound("readFileString", path));
-				}
-
-				return yield* Effect.tryPromise({
+			Effect.flatMap(find(app, path, "readFileString", TFile), (file) =>
+				Effect.tryPromise({
 					try: () => app.vault.cachedRead(file),
 					catch: (cause) => toPlatformError("readFileString", path, cause),
-				});
-			}),
+				}),
+			),
 		stat: (path) =>
-			Effect.gen(function* () {
-				const file = getAbstractFile(app, path);
-				if (!file) {
-					return yield* Effect.fail(toNotFound("stat", path));
-				}
-
+			Effect.map(find(app, path, "stat", TAbstractFile), (file) => {
 				const now = new Date();
 				const stats = file instanceof TFile ? file.stat : undefined;
 				const mtime = stats ? new Date(stats.mtime) : now;
@@ -106,8 +80,8 @@ function ObsidianFileSystemLive(app: App): Layer.Layer<EffectFileSystem.FileSyst
 		writeFileString: (path, data) =>
 			Effect.tryPromise({
 				try: async () => {
-					const file = getFile(app, path);
-					if (file) {
+					const file = getAbstractFile(app, path);
+					if (file instanceof TFile) {
 						// process() serializes this write with other vault operations on the file.
 						await app.vault.process(file, () => data);
 						return;
@@ -125,14 +99,15 @@ function getAbstractFile(app: App, path: string) {
 	return vaultPath === "" ? app.vault.getRoot() : app.vault.getAbstractFileByPath(vaultPath);
 }
 
-function getFile(app: App, path: string): TFile | null {
+/** The file or folder of the given type at `path`, or a NotFound error from `method`. */
+function find<T extends TAbstractFile>(
+	app: App,
+	path: string,
+	method: string,
+	type: abstract new (...args: never[]) => T,
+): Effect.Effect<T, PlatformError> {
 	const file = getAbstractFile(app, path);
-	return file instanceof TFile ? file : null;
-}
-
-function getFolder(app: App, path: string): TFolder | null {
-	const file = getAbstractFile(app, path);
-	return file instanceof TFolder ? file : null;
+	return file instanceof type ? Effect.succeed(file) : Effect.fail(toNotFound(method, path));
 }
 
 function toVaultPath(path: string): string {
