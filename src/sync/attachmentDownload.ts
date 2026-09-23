@@ -22,11 +22,11 @@ export function createAttachmentDownloader(baseFetch: ConfluenceFetch) {
 
 	const fetch: ConfluenceFetch = async (url, init) => {
 		if (!DOWNLOAD_PATH.test(new URL(url).pathname)) return baseFetch(url, init);
-		const response = await download(
-			url,
-			Object.fromEntries(new Headers(init.headers)),
-			init.signal,
-		);
+		const response = await nodeRequest(url, {
+			headers: Object.fromEntries(new Headers(init.headers)),
+			signal: init.signal,
+			maxBytes: MAX_ATTACHMENT_BYTES,
+		});
 		if (isRedirect(response.status) && response.location) {
 			captured.set(url, { location: new URL(response.location, url).href });
 			return jsonResponse(200);
@@ -60,7 +60,7 @@ async function fetchMedia(location: string): Promise<Uint8Array> {
 	let url = location;
 	for (let hop = 0; hop <= MAX_MEDIA_REDIRECTS; hop++) {
 		assertAtlassianMediaUrl(url);
-		const response = await download(url, {});
+		const response = await nodeRequest(url, { maxBytes: MAX_ATTACHMENT_BYTES });
 		if (isRedirect(response.status) && response.location) {
 			url = new URL(response.location, url).href;
 			continue;
@@ -82,16 +82,6 @@ export function assertAtlassianMediaUrl(value: string): void {
 		host.endsWith(".atlassian.net");
 	if (url.protocol !== "https:" || url.username || url.password || !atlassian)
 		throw new Error(`The attachment download was redirected to an unexpected address: ${host}`);
-}
-
-/** A GET over HTTPS with the size cap; redirects come back unfollowed. */
-async function download(
-	url: string,
-	headers: Record<string, string>,
-	signal?: AbortSignal | null,
-): Promise<{ status: number; location: string | undefined; body: Uint8Array }> {
-	const response = await nodeRequest(url, { headers, signal, maxBytes: MAX_ATTACHMENT_BYTES });
-	return { ...response, body: Uint8Array.from(response.body) };
 }
 
 function jsonResponse(status: number) {

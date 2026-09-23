@@ -1,5 +1,6 @@
 import { createFenceTracker } from "./fences";
 import type { ImageSize } from "./imageSize";
+import { decodeLink, hasUrlScheme } from "./paths";
 
 /** Returns the size of the image a note links to, or undefined if it can't be read. */
 export type ImageSizeLookup = (link: string) => Promise<ImageSize | undefined>;
@@ -55,7 +56,7 @@ export async function sizeImageEmbeds(
 			});
 			segment = await replaceAsync(segment, MARKDOWN_EMBED, async (embed, alt, url, title) => {
 				const link = url.replace(/^<|>$/g, "");
-				if (/^[a-z][a-z0-9+.-]*:/i.test(link)) return embed;
+				if (hasUrlScheme(link)) return embed;
 				const parts = alt.split("|");
 				const sizeText = parts.length > 1 ? parts.at(-1) : undefined;
 				const size = await sizeFor(decodeLink(link), sizeText);
@@ -87,12 +88,4 @@ async function replaceAsync(
 		last = match.index + match[0].length;
 	});
 	return result + text.slice(last);
-}
-
-function decodeLink(value: string): string {
-	try {
-		return decodeURIComponent(value);
-	} catch {
-		return value;
-	}
 }

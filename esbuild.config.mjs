@@ -36,7 +36,6 @@ const context = await esbuild.context({
 	format: "cjs",
 	platform: "browser",
 	target: "chrome106",
-	jsx: "automatic",
 	logLevel: "info",
 	sourcemap: prod ? false : "inline",
 	treeShaking: true,

@@ -1,5 +1,5 @@
 import type { App } from "obsidian";
-import { Effect } from "effect";
+import { Duration, Effect } from "effect";
 import {
 	transformMarkdownCodeBlocks,
 	type MarkdownSourceTransformer,
@@ -40,6 +40,11 @@ export function createDataviewTransformer(
 				plugins?: { plugins?: { dataview?: { api?: DataviewApi } } };
 			}
 		).plugins?.plugins?.dataview?.api;
+	/** Fails when the API that was waited for is no longer the current one. */
+	const checkApi = (api: DataviewApi) =>
+		getApi() === api
+			? Effect.void
+			: Effect.fail(new Error("Dataview was disabled or reloaded during publication."));
 
 	const waitForIndex = Effect.gen(function* () {
 		const api = getApi();
@@ -51,10 +56,7 @@ export function createDataviewTransformer(
 		// Dataview's metadata events are asynchronous. Comparing indexed mtimes also
 		// catches a dependency edited immediately before publishing, without a full reindex.
 		while (true) {
-			if (getApi() !== api)
-				return yield* Effect.fail(
-					new Error("Dataview was disabled or reloaded during publication."),
-				);
+			yield* checkApi(api);
 			const files = app.vault.getMarkdownFiles();
 			const paths = new Set(files.map((file) => file.path));
 			if (
@@ -69,13 +71,9 @@ export function createDataviewTransformer(
 			yield* Effect.sleep("50 millis");
 		}
 	}).pipe(
-		Effect.timeout("15 seconds"),
-		Effect.mapError((error) =>
-			error instanceof Error && error.name !== "TimeoutError"
-				? error
-				: new Error(
-						"Dataview indexing did not finish within 15 seconds. Wait for indexing, then publish again.",
-					),
+		withTimeout(
+			"15 seconds",
+			"Dataview indexing did not finish within 15 seconds. Wait for indexing, then publish again.",
 		),
 	);
 
@@ -95,22 +93,12 @@ export function createDataviewTransformer(
 					if (block.language !== "dataview") return undefined;
 					const api = readyApi ?? (yield* waitForIndex);
 					readyApi = api;
-					if (getApi() !== api)
-						return yield* Effect.fail(
-							new Error("Dataview was disabled or reloaded during publication."),
-						);
+					yield* checkApi(api);
 					const originFile = toVaultPath(context.absoluteFilePath);
 					const result = yield* Effect.tryPromise({
 						try: () => api.queryMarkdown(block.content, originFile, { allowHtml: false }),
 						catch: toError,
-					}).pipe(
-						Effect.timeout("30 seconds"),
-						Effect.mapError((error) =>
-							error instanceof Error && error.name !== "TimeoutError"
-								? error
-								: new Error("Dataview query exceeded 30 seconds."),
-						),
-					);
+					}).pipe(withTimeout("30 seconds", "Dataview query exceeded 30 seconds."));
 					if (!result.successful) return yield* Effect.fail(new Error(result.error));
 					return result.value;
 				}).pipe(
@@ -122,4 +110,15 @@ export function createDataviewTransformer(
 			);
 		},
 	};
+}
+
+/** Fail with `message` when the effect takes longer than `duration`; keep other errors. */
+function withTimeout(duration: Duration.Input, message: string) {
+	return <A, E>(effect: Effect.Effect<A, E>) =>
+		effect.pipe(
+			Effect.timeout(duration),
+			Effect.mapError((error) =>
+				error instanceof Error && error.name !== "TimeoutError" ? error : new Error(message),
+			),
+		);
 }

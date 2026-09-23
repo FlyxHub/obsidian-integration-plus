@@ -13,3 +13,17 @@ export function parentOf(path: string): string {
 export function baseName(path: string): string {
 	return path.slice(path.lastIndexOf("/") + 1);
 }
+
+/** True for links with a URL scheme, such as `https:`, which aren't vault paths. */
+export function hasUrlScheme(link: string): boolean {
+	return /^[a-z][a-z0-9+.-]*:/i.test(link);
+}
+
+/** Percent-decode a link, keeping it as it is when it isn't valid percent-encoding. */
+export function decodeLink(value: string): string {
+	try {
+		return decodeURIComponent(value);
+	} catch {
+		return value;
+	}
+}

@@ -1,11 +1,12 @@
 import { errorMessage } from "../errors";
 import { PAGE_ID_KEY, PAGE_TITLE_KEY } from "../frontmatterKeys";
-import { baseName, parentOf } from "../paths";
+import { parentOf } from "../paths";
 import { MERGE_FORMAT, adfToMergeMarkdown } from "./adfMarkdown";
 import type { ConfluenceRemote, RemoteChild, RemotePage } from "./confluenceRemote";
 import { mediaReferences, type MediaResolver, type MediaSync } from "./media";
 import { hasConflictMarkers, mergeThreeWay, mergeTwoWay, splitFrontmatter } from "./merge";
 import { createPageLinkResolver, rewritePageLinks, type PageLinkResolver } from "./pageLinks";
+import { isFolderNote } from "./partialPublish";
 import { toNoteName } from "./names";
 import type { SyncStateStore } from "./syncState";
 
@@ -102,7 +103,6 @@ interface PlannedImport {
 	frontmatter: Record<string, string>;
 }
 
-const FOLDER_NOTE_NAMES = ["index", "README", "readme"];
 const MAX_DEPTH = 50;
 
 export class PullService {
@@ -112,7 +112,7 @@ export class PullService {
 		private readonly remote: ConfluenceRemote,
 		private readonly vault: PullVault,
 		private readonly state: SyncStateStore,
-		private readonly media?: MediaSync,
+		private readonly media: Pick<MediaSync, "ensure" | "resolver">,
 	) {}
 
 	async pull(options: PullOptions): Promise<PullReport> {
@@ -220,7 +220,7 @@ export class PullService {
 		const current =
 			base?.format === MERGE_FORMAT &&
 			!base.unresolvedLinks.some((id) => resolve(id)) &&
-			(!this.media || base.unresolvedMedia.length === 0);
+			base.unresolvedMedia.length === 0;
 		if (base && current && remoteVersion === base.version) {
 			report.unchanged++;
 			return;
@@ -375,8 +375,8 @@ export class PullService {
 		resolve: PageLinkResolver,
 		download: boolean,
 	): Promise<{ converted: ConvertedPage; imageErrors: string[] }> {
-		const imageErrors = this.media ? await this.media.ensure(page.adf, { download }) : [];
-		const converted = convertPage(page.adf, urls, resolve, this.media?.resolver());
+		const imageErrors = await this.media.ensure(page.adf, { download });
+		const converted = convertPage(page.adf, urls, resolve, this.media.resolver());
 		return { converted, imageErrors };
 	}
 
@@ -428,13 +428,6 @@ function inferRootFolder(
 		return isFolderNote(path) ? parentOf(parentOf(path)) : parentOf(path);
 	}
 	return undefined;
-}
-
-/** A folder note supplies its folder's page: named like the folder, or index/README. */
-export function isFolderNote(path: string): boolean {
-	const name = baseName(path).replace(/\.md$/, "");
-	const folder = parentOf(path);
-	return folder !== "" && (name === baseName(folder) || FOLDER_NOTE_NAMES.includes(name));
 }
 
 /** The publisher's generated folder pages contain only a Page Tree macro. */

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { decodeLink, hasUrlScheme } from "../paths";
 import type { ObsidianPluginSettings } from "../settings";
 
 /**
@@ -73,15 +74,7 @@ export function noteReferences(text: string): { embeds: string[]; links: string[
 		if (name) (bang ? embeds : links).add(name);
 	}
 	for (const [, target] of text.matchAll(MARKDOWN_EMBED)) {
-		if (!/^[a-z][a-z0-9+.-]*:/i.test(target!)) embeds.add(decodeLinkPath(target!));
+		if (!hasUrlScheme(target!)) embeds.add(decodeLink(target!));
 	}
 	return { embeds: [...embeds], links: [...links] };
-}
-
-function decodeLinkPath(value: string): string {
-	try {
-		return decodeURIComponent(value);
-	} catch {
-		return value;
-	}
 }

@@ -1,6 +1,6 @@
 import { resolveConfluencePageId } from "@markdown-confluence/lib";
 import { createFenceTracker } from "../fences";
-import { baseName } from "../paths";
+import { baseName, decodeLink } from "../paths";
 
 /** Returns the wikilink target for a Confluence page ID, or undefined if no note has it. */
 export type PageLinkResolver = (pageId: string) => string | undefined;
@@ -76,14 +76,7 @@ export function pageLinkTarget(
 
 /** Confluence heading anchors replace spaces with hyphens; Obsidian links use the heading text. */
 function headingFromAnchor(hash: string): string {
-	if (!hash) return "";
-	let decoded = hash.slice(1);
-	try {
-		decoded = decodeURIComponent(decoded);
-	} catch {
-		// Keep the raw anchor.
-	}
-	return decoded.replace(/-/g, " ").trim();
+	return hash ? decodeLink(hash.slice(1)).replace(/-/g, " ").trim() : "";
 }
 
 function toWikilink(

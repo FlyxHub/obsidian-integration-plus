@@ -3,6 +3,7 @@ import {
 	ADFProcessingPlugin,
 	ConfluencePageConfig,
 	ConfluenceUploadSettings,
+	createAuthenticatedConfluenceClient,
 	HttpKrokiRenderer,
 	KrokiRendererPlugin,
 	MarkdownConfluencePlatform,
@@ -16,6 +17,7 @@ import {
 	PlantumlRendererPlugin,
 	Publisher,
 	shouldPublishMarkdownFile,
+	validateConfluenceSettings,
 } from "@markdown-confluence/lib";
 import { Effect, Layer } from "effect";
 import {
@@ -40,7 +42,6 @@ import { sizeImageEmbeds, type ImageSizeLookup } from "./imageEmbeds";
 import { imageSize } from "./imageSize";
 import { krokiFetch } from "./KrokiFetch";
 import { loadMermaidStyles, type MermaidStyles } from "./mermaidStyles";
-import { createObsidianConfluenceClient } from "./ObsidianAuthentication";
 import { toVaultPath } from "./paths";
 import { isExcluded, publishFlagFor } from "./publishSelection";
 import { createAttachmentDownloader } from "./sync/attachmentDownload";
@@ -63,11 +64,13 @@ import {
 import { createSyncStateStore, type SyncStateStore } from "./sync/syncState";
 import {
 	ObsidianPluginSettings,
+	describeSettingsIssue,
 	mergeSettings,
 	migrateSecretsToStorage,
 	oauthApiUrl,
 	toPersistedSettings,
 	usesBrowserLogin,
+	withBearerToken,
 	withResolvedSecrets,
 	withSiteUrlFallback,
 } from "./settings";
@@ -77,7 +80,7 @@ const LEGACY_PLUGIN_ID = "confluence-integration";
 /** The publisher's error when a page was last edited by someone else. */
 const EDITED_BY_OTHER_USER = "Page last updated by another user";
 
-type ConfluenceClient = Awaited<ReturnType<typeof createObsidianConfluenceClient>>;
+type ConfluenceClient = Awaited<ReturnType<ConfluencePlugin["authenticationClient"]>>;
 
 /** What a publish sends: one note, the notes changed since they were last in sync, or all. */
 type PublishScope = { note: string } | "changes" | "all";
@@ -260,7 +263,8 @@ export default class ConfluencePlugin extends Plugin {
 		return withSiteUrlFallback(withResolvedSecrets(this.settings, this.app.secretStorage));
 	}
 
-	async authenticationClient(fetch?: ConfluenceFetch) {
+	/** Built for each publish or pull, so a vault left open never keeps an expired OAuth token. */
+	async authenticationClient(fetch: ConfluenceFetch = desktopFetch) {
 		const settings = this.resolvedSettings();
 		const browser = usesBrowserLogin(settings);
 		if (browser) {
@@ -271,10 +275,16 @@ export default class ConfluencePlugin extends Plugin {
 					"The selected OAuth site differs from the publish destination. Choose your site again.",
 				);
 		}
-		return createObsidianConfluenceClient(
-			settings,
-			browser ? await this.browserOAuth.accessToken() : undefined,
-			fetch,
+		const oauthAccessToken = browser ? await this.browserOAuth.accessToken() : undefined;
+		const validation = validateConfluenceSettings(
+			oauthAccessToken ? withBearerToken(settings, oauthAccessToken) : settings,
+		);
+		if (!validation.valid) throw new Error(validation.issues.map(describeSettingsIssue).join("\n"));
+		return Effect.runPromise(
+			createAuthenticatedConfluenceClient(settings, {
+				fetch,
+				...(oauthAccessToken ? { oauthAccessToken } : {}),
+			}),
 		);
 	}
 
@@ -362,7 +372,10 @@ export default class ConfluencePlugin extends Plugin {
 	/** Pull and publish-time base recording share one service, with the same image handling. */
 	private createPullService(client: ConfluenceClient, download?: AttachmentDownload): PullService {
 		const remote = createConfluenceRemote(client, download);
-		const vault = createObsidianPullVault(this.app, this.fingerprinter());
+		const vault = createObsidianPullVault(
+			this.app,
+			createNoteFingerprinter(this.app, this.settings),
+		);
 		const media = new MediaSync(remote, vault, this.syncState, this.settings.imageFolder);
 		return new PullService(remote, vault, this.syncState, media);
 	}
@@ -399,11 +412,6 @@ export default class ConfluencePlugin extends Plugin {
 		});
 	}
 
-	/** Fingerprints notes with the current settings; see `sync/fingerprint.ts`. */
-	private fingerprinter(): NoteFingerprinter {
-		return createNoteFingerprinter(this.app, this.settings);
-	}
-
 	private async runPublish(scope: PublishScope): Promise<void> {
 		await this.runExclusive(async (signal) => {
 			try {
@@ -429,7 +437,7 @@ export default class ConfluencePlugin extends Plugin {
 		scope: PublishScope,
 	): Promise<UploadResults | undefined> {
 		const client = await this.authenticationClient();
-		const fingerprint = this.fingerprinter();
+		const fingerprint = createNoteFingerprinter(this.app, this.settings);
 		const publishFilter = typeof scope === "object" ? scope.note : undefined;
 		const candidates = await this.notesToPublish(publishFilter);
 		const notes =
