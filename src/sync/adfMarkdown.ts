@@ -1,3 +1,4 @@
+import "../markdownIt";
 import {
 	convertADFToMarkdown,
 	parseMarkdownToADF,

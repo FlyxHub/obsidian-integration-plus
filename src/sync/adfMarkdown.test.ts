@@ -137,3 +137,17 @@ test("an untitled Obsidian callout publishes as a panel and pulls back unchanged
 	]);
 	expect(adfToMergeMarkdown(published, BASE_URL)).toBe(source);
 });
+
+test("keeps escapes and entities at the start of a callout", () => {
+	const panel = {
+		type: "panel",
+		attrs: { panelType: "note" },
+		content: [paragraph("a > b & c")],
+	};
+	const markdown = adfToMergeMarkdown(doc(panel), BASE_URL);
+	expect(markdown).not.toContain("```adf");
+	for (const source of [markdown, "> [!note]\n> a \\> b &amp; c"]) {
+		const published = parseMarkdownToADF(normalizeCalloutsForPublish(source), BASE_URL);
+		expect(sameContent(published.content, [panel])).toBe(true);
+	}
+});
