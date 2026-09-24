@@ -1,3 +1,4 @@
+import "./markdownIt";
 import { MarkdownView, Notice, Plugin, TFile, normalizePath } from "obsidian";
 import {
 	ADFProcessingPlugin,

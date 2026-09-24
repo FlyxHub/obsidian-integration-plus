@@ -2,6 +2,12 @@
 
 All notable changes to Confluence Integration Plus are listed here. For the history of the plugin this one was forked from, see the [markdown-confluence changelog](https://github.com/markdown-confluence/markdown-confluence/blob/main/CHANGELOG.md).
 
+## 1.2.2 (unreleased)
+
+### Fixes
+
+- Callouts whose first line contains an escaped character, such as `\>`, or an HTML entity, such as `&amp;`, publish and pull correctly. Before, publishing such a note failed, and publishing or pulling a page with such a panel showed "Token type `text_special` not supported by Markdown parser".
+
 ## 1.2.1 (2026-09-24)
 
 ### Fixes
