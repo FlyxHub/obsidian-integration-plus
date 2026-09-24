@@ -1,3 +1,4 @@
+import { getMermaidFileName, parseMarkdownToADF } from "@markdown-confluence/lib";
 import { errorMessage } from "../errors";
 import { baseName } from "../paths";
 import { createLinkTextIndex } from "./pageLinks";
@@ -29,8 +30,11 @@ export interface MediaMapStore {
 	setMedia(map: Record<string, string>): Promise<void>;
 }
 
-/** Returns the embed text for a media file ID, or undefined if it has no local file. */
+/** Returns the Markdown for a media file ID, or undefined if it has no local equivalent. */
 export type MediaResolver = (fileId: string) => string | undefined;
+
+/** Attachment title of a rendered diagram → the Markdown block it was rendered from. */
+export type DiagramSources = ReadonlyMap<string, string>;
 
 /** The publisher uploads a local file as `<32-hex hash>-<file name>`. */
 const PUBLISHED_ATTACHMENT = /^[0-9a-f]{32}-(.+)$/;
@@ -42,6 +46,8 @@ const PUBLISHED_ATTACHMENT = /^[0-9a-f]{32}-(.+)$/;
 export class MediaSync {
 	private map: Record<string, string> | undefined;
 	private readonly attachments = new Map<string, Promise<RemoteAttachment[]>>();
+	/** Media file ID → the Markdown block of a diagram the publisher rendered to that file. */
+	private readonly diagrams = new Map<string, string>();
 	/** Vault files by name and their link text; rebuilt after this class writes a file. */
 	private files: { linkText: (path: string) => string; byName: Map<string, string[]> } | undefined;
 
@@ -52,34 +58,51 @@ export class MediaSync {
 		private readonly folder: string,
 	) {}
 
-	/** Embed text for files that exist in the vault. Call `ensure` first for new pages. */
+	/**
+	 * Diagram source blocks, or embeds of files that exist in the vault. Call `ensure` first
+	 * for new pages.
+	 */
 	resolver(): MediaResolver {
 		const map = this.map ?? {};
 		const { linkText } = this.fileIndex();
 		return (fileId) => {
+			const diagram = this.diagrams.get(fileId);
+			if (diagram) return diagram;
 			const path = map[fileId];
-			return path && this.vault.exists(path) ? linkText(path) : undefined;
+			return path && this.vault.exists(path) ? `![[${linkText(path)}]]` : undefined;
 		};
 	}
 
 	/**
 	 * Make every file referenced by the page available locally. Files the publisher uploaded
 	 * from this vault are matched by name; others are downloaded when `download` is true.
+	 * Diagrams the publisher rendered from one of `diagrams`' blocks resolve to that block,
+	 * so a note's Mermaid code isn't replaced by its image.
 	 * Failures are collected instead of thrown, so one broken image doesn't stop a pull.
 	 */
-	async ensure(adf: unknown, options: { download: boolean }): Promise<string[]> {
+	async ensure(
+		adf: unknown,
+		options: { download: boolean; diagrams?: DiagramSources },
+	): Promise<string[]> {
 		const map = await this.loadMap();
+		const diagrams = options.diagrams ?? new Map<string, string>();
 		const errors: string[] = [];
 		let changed = false;
 		for (const { fileId, pageId } of mediaReferences(adf)) {
 			const known = map[fileId];
-			if (known && this.vault.exists(known)) continue;
-			if (!pageId) continue;
+			const isLocal = !!known && this.vault.exists(known);
+			if ((isLocal && diagrams.size === 0) || !pageId) continue;
 			try {
 				const attachment = (await this.listAttachments(pageId)).find(
 					(entry) => entry.fileId === fileId,
 				);
 				if (!attachment) continue;
+				const diagram = diagrams.get(attachment.title);
+				if (diagram) {
+					this.diagrams.set(fileId, diagram);
+					continue;
+				}
+				if (isLocal) continue;
 				const published = PUBLISHED_ATTACHMENT.exec(attachment.title)?.[1];
 				const localCopy = published && this.findFileNamed(published);
 				if (localCopy) {
@@ -183,4 +206,32 @@ export function mediaReferences(adf: unknown): { fileId: string; pageId: string 
 	};
 	visit(adf);
 	return references;
+}
+
+/**
+ * The Mermaid blocks in these Markdown texts, by the attachment title the publisher gives
+ * each rendered diagram (`RenderedMermaidChart-<hash>`, as PNG or SVG).
+ */
+export function mermaidDiagrams(
+	texts: readonly string[],
+	confluenceBaseUrl: string,
+): Map<string, string> {
+	const diagrams = new Map<string, string>();
+	for (const text of texts) {
+		for (const block of parseMarkdownToADF(text, confluenceBaseUrl).content ?? []) {
+			const code = block.content?.[0]?.text;
+			if (
+				block.type !== "codeBlock" ||
+				(block.attrs as { language?: unknown } | undefined)?.language !== "mermaid" ||
+				!code
+			)
+				continue;
+			for (const format of ["png", "svg"] as const)
+				diagrams.set(
+					getMermaidFileName(code, format).uploadFilename,
+					`\`\`\`mermaid\n${code}\n\`\`\``,
+				);
+		}
+	}
+	return diagrams;
 }

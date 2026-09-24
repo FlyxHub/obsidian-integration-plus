@@ -34,13 +34,14 @@ import { desktopFetch } from "./desktopFetch";
 import { ElectronMathRenderer, ElectronMermaidRenderer } from "./electronRenderers";
 import { ObsidianPlatformLive } from "./effects/ObsidianPlatform";
 import { errorMessage, toError } from "./errors";
-import { PUBLISH_KEY } from "./frontmatterKeys";
+import { PAGE_URL_KEY, PUBLISH_KEY } from "./frontmatterKeys";
 import { sizeImageEmbeds, type ImageSizeLookup } from "./imageEmbeds";
 import { imageSize } from "./imageSize";
 import { krokiFetch } from "./KrokiFetch";
 import { loadMermaidStyles, type MermaidStyles } from "./mermaidStyles";
 import { toVaultPath } from "./paths";
 import { isExcluded, publishFlagFor } from "./publishSelection";
+import { wikilinksToPageLinks, type PageUrlLookup } from "./wikilinks";
 import { createAttachmentDownloader } from "./sync/attachmentDownload";
 import { createConfluenceRemote, type AttachmentDownload } from "./sync/confluenceRemote";
 import { MediaSync } from "./sync/media";
@@ -631,8 +632,8 @@ export default class ConfluencePlugin extends Plugin {
 	}
 
 	/**
-	 * Publish-time Markdown changes: Dataview results, callouts shaped for panels, and image
-	 * embeds with explicit sizes. None of them change the note.
+	 * Publish-time Markdown changes: Dataview results, callouts shaped for panels, links to
+	 * published notes, and image embeds with explicit sizes. None of them change the note.
 	 */
 	private sourceTransformer(): MarkdownSourceTransformer {
 		const dataview = createDataviewTransformer(this.app, this.settings);
@@ -641,6 +642,9 @@ export default class ConfluencePlugin extends Plugin {
 			transform: (markdown, context) =>
 				dataview.transform(markdown, context).pipe(
 					Effect.map(normalizeCalloutsForPublish),
+					Effect.map((text) =>
+						wikilinksToPageLinks(text, this.pageUrlLookup(toVaultPath(context.absoluteFilePath))),
+					),
 					Effect.flatMap((text) =>
 						Effect.tryPromise({
 							try: () =>
@@ -653,6 +657,17 @@ export default class ConfluencePlugin extends Plugin {
 						}),
 					),
 				),
+		};
+	}
+
+	/** Finds the page URL of the note a link points to, resolving links as Obsidian does. */
+	private pageUrlLookup(sourcePath: string): PageUrlLookup {
+		return (link) => {
+			const file = this.app.metadataCache.getFirstLinkpathDest(link, sourcePath);
+			const url: unknown = file
+				? this.app.metadataCache.getFileCache(file)?.frontmatter?.[PAGE_URL_KEY]
+				: undefined;
+			return typeof url === "string" && url.startsWith("https://") ? url : undefined;
 		};
 	}
 

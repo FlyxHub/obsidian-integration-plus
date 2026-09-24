@@ -1,5 +1,5 @@
 import { expect, test } from "@effect/vitest";
-import { parseMarkdownToADF } from "@markdown-confluence/lib";
+import { getMermaidFileName, parseMarkdownToADF } from "@markdown-confluence/lib";
 import { MERGE_FORMAT, adfToMergeMarkdown } from "./adfMarkdown";
 import type { ConfluenceRemote, RemoteChild, RemotePage } from "./confluenceRemote";
 import { HAS_CONFLICTS, NEEDS_PULL, checkBeforePublish, findChangedNotes } from "./publishGate";
@@ -484,8 +484,53 @@ test("reuses downloaded and published images instead of downloading again", asyn
 	});
 	expect(await sync.ensure(adfWith("known", "published"), { download: false })).toEqual([]);
 	const resolve = sync.resolver();
-	expect(resolve("known")).toBe("diagram.png");
-	expect(resolve("published")).toBe("local.png");
+	expect(resolve("known")).toBe("![[diagram.png]]");
+	expect(resolve("published")).toBe("![[local.png]]");
+});
+
+test("pulls a published Mermaid diagram back as its source, not its image", async () => {
+	const code = "graph TD\n  A --> B";
+	const note = `---\nconnie-page-id: "1"\n---\nhttps://example.com\n\n\`\`\`mermaid\n${code}\n\`\`\`\n\nText.\n`;
+	const pageAdf = (text: string) => ({
+		type: "doc",
+		version: 1,
+		content: [
+			{
+				type: "mediaSingle",
+				attrs: { layout: "center" },
+				content: [{ type: "media", attrs: { id: "d1", type: "file", collection: "contentId-1" } }],
+			},
+			{ type: "paragraph", content: [{ type: "text", text }] },
+		],
+	});
+	const { vault, files } = fakeVault({ "Note.md": note });
+	const { store, bases } = fakeState();
+	const title = getMermaidFileName(code, "png").uploadFilename;
+	const downloaded: string[] = [];
+	const mediaVault = {
+		filePaths: () => [...Object.keys(files), ...downloaded],
+		exists: (path: string) => path in files || downloaded.includes(path),
+		writeBinary: async (path: string) => void downloaded.push(path),
+	};
+	const mediaRemote = {
+		listAttachments: async () => [{ id: "a1", title, fileId: "d1" }],
+		downloadAttachment: async () => new Uint8Array([1]),
+	};
+	const sync = () => new MediaSync(mediaRemote, mediaVault, store, "images");
+	let remote = fakeRemote([{ ...page("1", "", 2), adf: pageAdf("Text.") }]);
+	await new PullService(remote, vault, store, sync()).recordPublished(
+		[{ pageId: "1", unchanged: false, fingerprint: undefined }],
+		OPTIONS,
+	);
+	expect(bases.get("1")?.unresolvedMedia).toEqual([]);
+
+	// Someone edits the text in Confluence; the diagram and the note's Mermaid block stay.
+	remote = fakeRemote([{ ...page("1", "", 3), adf: pageAdf("Edited.") }]);
+	const report = await new PullService(remote, vault, store, sync()).pull(OPTIONS);
+
+	expect(report.conflicted).toEqual([]);
+	expect(files["Note.md"]).toBe(note.replace("Text.", "Edited."));
+	expect(downloaded).toEqual([]);
 });
 
 test("names downloaded files safely and without overwriting", () => {

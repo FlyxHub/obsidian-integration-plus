@@ -3,7 +3,7 @@ import { PAGE_ID_KEY, PAGE_TITLE_KEY } from "../frontmatterKeys";
 import { parentOf } from "../paths";
 import { MERGE_FORMAT, adfToMergeMarkdown } from "./adfMarkdown";
 import type { ConfluenceRemote, RemoteChild, RemotePage } from "./confluenceRemote";
-import { mediaReferences, type MediaResolver, type MediaSync } from "./media";
+import { mediaReferences, mermaidDiagrams, type MediaResolver, type MediaSync } from "./media";
 import { hasConflictMarkers, mergeThreeWay, mergeTwoWay, splitFrontmatter } from "./merge";
 import { createPageLinkResolver, rewritePageLinks, type PageLinkResolver } from "./pageLinks";
 import { isFolderNote } from "./partialPublish";
@@ -156,7 +156,7 @@ export class PullService {
 			options.signal?.throwIfAborted();
 			options.onProgress?.(`Importing ${path}`);
 			try {
-				const converted = await this.convertForPull(page, path, options, resolve, report);
+				const converted = await this.convertForPull(page, path, options, resolve, report, []);
 				await this.vault.create(path, converted.markdown, frontmatter);
 				await this.recordBase(page, converted, await this.vault.fingerprint(path));
 				report.imported.push(path);
@@ -176,7 +176,8 @@ export class PullService {
 		pages: readonly PublishedPage[],
 		urls: SiteUrls,
 	): Promise<{ pageId: string; reason: string }[]> {
-		const resolve = createPageLinkResolver(this.vault.linkedNotes(), this.vault.notePaths());
+		const linked = this.vault.linkedNotes();
+		const resolve = createPageLinkResolver(linked, this.vault.notePaths());
 		const failures: { pageId: string; reason: string }[] = [];
 		for (const { pageId, unchanged, fingerprint } of pages) {
 			try {
@@ -189,7 +190,9 @@ export class PullService {
 				}
 				const page = await this.remote.getPage(pageId);
 				if (!page) continue;
-				const { converted } = await this.convert(page, urls, resolve, false);
+				const path = linked.get(pageId);
+				const sources = path ? [await this.vault.read(path)] : [];
+				const { converted } = await this.convert(page, urls, resolve, false, sources);
 				await this.recordBase(page, converted, fingerprint);
 			} catch (error) {
 				failures.push({ pageId, reason: errorMessage(error) });
@@ -240,7 +243,10 @@ export class PullService {
 		const wasInSync =
 			base?.localFingerprint !== undefined &&
 			(await this.vault.fingerprint(path)) === base.localFingerprint;
-		const remote = await this.convertForPull(page, path, options, resolve, report);
+		const remote = await this.convertForPull(page, path, options, resolve, report, [
+			local,
+			base?.markdown ?? "",
+		]);
 		const { frontmatter, body } = splitFrontmatter(local);
 		let merged;
 		if (base) {
@@ -368,14 +374,22 @@ export class PullService {
 		};
 	}
 
-	/** Make the page's images local, then convert it. Image failures are returned, not thrown. */
+	/**
+	 * Make the page's images local, then convert it. Diagrams rendered from Mermaid blocks in
+	 * `sources` (the note and its base) convert back to those blocks. Image failures are
+	 * returned, not thrown.
+	 */
 	private async convert(
 		page: RemotePage,
 		urls: SiteUrls,
 		resolve: PageLinkResolver,
 		download: boolean,
+		sources: readonly string[],
 	): Promise<{ converted: ConvertedPage; imageErrors: string[] }> {
-		const imageErrors = await this.media.ensure(page.adf, { download });
+		const imageErrors = await this.media.ensure(page.adf, {
+			download,
+			diagrams: mermaidDiagrams(sources, urls.confluenceBaseUrl),
+		});
 		const converted = convertPage(page.adf, urls, resolve, this.media.resolver());
 		return { converted, imageErrors };
 	}
@@ -387,8 +401,9 @@ export class PullService {
 		urls: SiteUrls,
 		resolve: PageLinkResolver,
 		report: PullReport,
+		sources: readonly string[],
 	): Promise<ConvertedPage> {
-		const { converted, imageErrors } = await this.convert(page, urls, resolve, true);
+		const { converted, imageErrors } = await this.convert(page, urls, resolve, true, sources);
 		for (const error of imageErrors)
 			report.skipped.push({ name: path, reason: `An image wasn't downloaded: ${error}` });
 		return converted;

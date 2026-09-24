@@ -6,5 +6,7 @@ const config = ConfluencePageConfig.conniePerPageConfig;
 export const PAGE_ID_KEY = config.pageId.key;
 /** `connie-title`: the page title, when it differs from the note name. */
 export const PAGE_TITLE_KEY = config.pageTitle.key;
+/** `connie-page-url`: the address of the page a note is published to. */
+export const PAGE_URL_KEY = config.pageUrl.key;
 /** `connie-publish`: publish a note that folder or tag rules don't select, or skip one. */
 export const PUBLISH_KEY = config.publish.key;

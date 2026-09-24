@@ -31,6 +31,11 @@ test("converts editor-saved blocks to readable Markdown", () => {
 	expect(markdown).toBe("# Title\n\nHello.\n\n- [ ] todo\n- [x] done\n");
 });
 
+test("ignores line breaks at the end of a paragraph", () => {
+	const block = { type: "paragraph", content: [text("Explain."), { type: "hardBreak" }] };
+	expect(adfToMergeMarkdown(doc(block), BASE_URL)).toBe("Explain.\n");
+});
+
 test("separates blocks with blank lines so tables do not absorb paragraphs", () => {
 	const cell = (type: string, value: string) => ({
 		type,
