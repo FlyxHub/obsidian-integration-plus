@@ -212,10 +212,13 @@ export function mediaReferences(adf: unknown): { fileId: string; pageId: string 
  * The Mermaid blocks in these Markdown texts, by the attachment title the publisher gives
  * each rendered diagram (`RenderedMermaidChart-<hash>`, as PNG or SVG).
  */
-export function mermaidDiagrams(texts: readonly string[]): Map<string, string> {
+export function mermaidDiagrams(
+	texts: readonly string[],
+	confluenceBaseUrl: string,
+): Map<string, string> {
 	const diagrams = new Map<string, string>();
 	for (const text of texts) {
-		for (const block of parseMarkdownToADF(text, "").content ?? []) {
+		for (const block of parseMarkdownToADF(text, confluenceBaseUrl).content ?? []) {
 			const code = block.content?.[0]?.text;
 			if (
 				block.type !== "codeBlock" ||

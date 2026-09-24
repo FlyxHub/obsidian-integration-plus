@@ -388,7 +388,7 @@ export class PullService {
 	): Promise<{ converted: ConvertedPage; imageErrors: string[] }> {
 		const imageErrors = await this.media.ensure(page.adf, {
 			download,
-			diagrams: mermaidDiagrams(sources),
+			diagrams: mermaidDiagrams(sources, urls.confluenceBaseUrl),
 		});
 		const converted = convertPage(page.adf, urls, resolve, this.media.resolver());
 		return { converted, imageErrors };

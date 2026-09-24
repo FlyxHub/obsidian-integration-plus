@@ -490,7 +490,7 @@ test("reuses downloaded and published images instead of downloading again", asyn
 
 test("pulls a published Mermaid diagram back as its source, not its image", async () => {
 	const code = "graph TD\n  A --> B";
-	const note = `---\nconnie-page-id: "1"\n---\n\`\`\`mermaid\n${code}\n\`\`\`\n\nText.\n`;
+	const note = `---\nconnie-page-id: "1"\n---\nhttps://example.com\n\n\`\`\`mermaid\n${code}\n\`\`\`\n\nText.\n`;
 	const pageAdf = (text: string) => ({
 		type: "doc",
 		version: 1,
