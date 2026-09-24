@@ -7,6 +7,7 @@ All notable changes to Confluence Integration Plus are listed here. For the hist
 ### Fixes
 
 - Pulling a note with a Mermaid diagram no longer causes a conflict between the diagram's source and its image, and no longer downloads the rendered image into your vault. Pages published with an earlier version are fixed on their next pull.
+- Pulled or imported paragraphs that end with a line break (Shift+Enter in Confluence) appear as text instead of an `adf` code block. Notes that already have such a block get the text on their next pull.
 - **Publish changes** keeps wikilinks, such as `[[Other note]]`, to published notes that it doesn't republish. Before, those links became plain text in Confluence. Wikilinks now also go to the note that Obsidian opens when two notes have the same name.
 
 ## 1.2.0 (2026-09-23)

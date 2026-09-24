@@ -54,8 +54,9 @@ function joinBlocks(content: unknown[], confluenceBaseUrl: string, media: MediaR
  * 1: initial. 2: panels as callouts. 3: links to pages with notes as wikilinks.
  * 4: images as embeds of downloaded files; empty paragraphs left out.
  * 5: rendered Mermaid diagrams as their source blocks.
+ * 6: line breaks at the end of a paragraph ignored.
  */
-export const MERGE_FORMAT = 5;
+export const MERGE_FORMAT = 6;
 
 /** Confluence panel types and the Obsidian callout type that publishes back to each. */
 const PANEL_CALLOUTS: Record<string, string> = {
@@ -164,7 +165,10 @@ export function sameContent(left: unknown, right: unknown): boolean {
 	return JSON.stringify(stripPresentation(left)) === JSON.stringify(stripPresentation(right));
 }
 
-/** Remove editor-only attributes, and empty `attrs`/`marks`, so fragments compare by content. */
+/**
+ * Remove editor-only attributes, empty `attrs`/`marks`, and line breaks at the end of a
+ * paragraph (which Markdown can't represent and don't show), so fragments compare by content.
+ */
 function stripPresentation<T>(value: T): T {
 	if (Array.isArray(value)) return value.map(stripPresentation) as T;
 	if (!value || typeof value !== "object") return value;
@@ -180,6 +184,12 @@ function stripPresentation<T>(value: T): T {
 		}
 		if (key === "marks" && Array.isArray(child) && child.length === 0) continue;
 		result[key] = stripPresentation(child);
+	}
+	const content = result["content"];
+	if (result["type"] === "paragraph" && Array.isArray(content)) {
+		let end = content.length;
+		while (end > 0 && (content[end - 1] as { type?: unknown })?.type === "hardBreak") end--;
+		result["content"] = content.slice(0, end);
 	}
 	return sortKeys(result) as T;
 }
