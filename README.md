@@ -289,15 +289,16 @@ The plugin skips a page, and says why in the results dialog, in these cases:
 - For security, pulled code blocks that plugins run as JavaScript, such as `dataviewjs` and `js-engine`, become plain `text` code blocks, and Dataview inline JavaScript (`` `$= ...` ``) is disabled. This prevents anyone who can edit a Confluence page from running code in your vault. Code blocks that you wrote in Obsidian aren't changed.
 - Short share links, such as `https://example.atlassian.net/wiki/x/AbCd`, don't contain a page ID, so they stay web links.
 - Confluence builds section anchors from heading text, so a heading link can be approximate when a heading contains hyphens or punctuation. The link still opens the right note.
-- A smart link card to a page becomes a wikilink, and publishes back as an ordinary link with the page title.
+- A smart link card to a page becomes a wikilink, and publishes back as a smart link card. A wikilink with an alias, such as `[[Local Admin Access|the admin page]]`, publishes as an ordinary link with that text.
 - Pull applies changes line by line. If you and someone in Confluence edit the same paragraph, the whole paragraph is a conflict.
 
 ## Diagrams, equations, and embeds
 
+- **Links:** Wikilinks to published notes, such as `[[Release Checklist]]`, become links to their Confluence pages, even when **Publish changes** doesn't republish the linked note. Links to notes that aren't published become plain text.
 - **Embeds:** The plugin expands note embeds, such as `![[Shared Notes/Release Checklist]]`, before publishing.
 - **Image size:** Images wider than **Maximum image width** (700 pixels by default) are scaled down to that width in Confluence, close to how Obsidian shows them. To set the width of one image, add it to the embed, such as `![[diagram.png|400]]` or `![Diagram|400](diagram.png)`. The height follows from the image's shape. To set both, use `WIDTHxHEIGHT`, such as `![[diagram.png|400x300]]`. Your notes aren't changed.
 - **Callouts and panels:** Callouts publish as Confluence panels, and pulled panels become callouts. Info, note, warning, and success panels match the callout of the same name, and error panels match `[!failure]`. A callout without a title publishes only its text, because the panel's icon shows its type. A callout with a title publishes the title as the panel's first line. Other callout types publish as info panels or custom panels.
-- **Mermaid and LaTeX:** The plugin renders Mermaid diagrams and LaTeX equations on your computer.
+- **Mermaid and LaTeX:** The plugin renders Mermaid diagrams and LaTeX equations on your computer. When you pull, a Mermaid diagram that you published stays Mermaid code in your note.
 - **Kroki and PlantUML:** Kroki (`kroki-*` code blocks) and PlantUML (`plantuml`, `puml`, and `uml` code blocks) are off by default. When you turn them on, the plugin sends diagram source to the server that you configure. Use a server that you trust, such as a self-hosted instance.
 - **Dataview:** If Dataview is installed and **Publish Dataview results** is on, the plugin publishes the results of Dataview `TABLE`, `LIST`, and `TASK` queries. DataviewJS and inline queries aren't supported.
 

@@ -53,8 +53,9 @@ function joinBlocks(content: unknown[], confluenceBaseUrl: string, media: MediaR
  * difference is merged into notes as a formatting update.
  * 1: initial. 2: panels as callouts. 3: links to pages with notes as wikilinks.
  * 4: images as embeds of downloaded files; empty paragraphs left out.
+ * 5: rendered Mermaid diagrams as their source blocks.
  */
-export const MERGE_FORMAT = 4;
+export const MERGE_FORMAT = 5;
 
 /** Confluence panel types and the Obsidian callout type that publishes back to each. */
 const PANEL_CALLOUTS: Record<string, string> = {
@@ -107,9 +108,10 @@ function panelToCallout(
 }
 
 /**
- * Images and files as Obsidian embeds of their downloaded copies. Publishing uploads the
- * local file again, so these blocks skip the round-trip check: the media ID changes, but the
- * page shows the same image. Returns undefined unless every file in the block has a copy.
+ * Images and files as Obsidian embeds of their downloaded copies, and rendered diagrams as
+ * their source. Publishing uploads or renders them again, so these blocks skip the
+ * round-trip check: the media ID changes, but the page shows the same image. Returns
+ * undefined unless every file in the block resolves.
  */
 function mediaEmbeds(block: AdfNode, media: MediaResolver): string | undefined {
 	if (block.type !== "mediaSingle" && block.type !== "mediaGroup") return undefined;
@@ -117,9 +119,9 @@ function mediaEmbeds(block: AdfNode, media: MediaResolver): string | undefined {
 	if (items.length === 0 || items.some((item) => item.type !== "media")) return undefined;
 	const embeds = items.map((item) => {
 		const fileId = item.attrs?.["id"];
-		const target =
-			item.attrs?.["type"] === "file" && typeof fileId === "string" ? media(fileId) : undefined;
-		return target ? `![[${target}]]` : undefined;
+		return item.attrs?.["type"] === "file" && typeof fileId === "string"
+			? media(fileId)
+			: undefined;
 	});
 	return embeds.every((embed) => embed !== undefined) ? embeds.join("\n") : undefined;
 }

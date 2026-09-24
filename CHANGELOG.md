@@ -2,6 +2,13 @@
 
 All notable changes to Confluence Integration Plus are listed here. For the history of the plugin this one was forked from, see the [markdown-confluence changelog](https://github.com/markdown-confluence/markdown-confluence/blob/main/CHANGELOG.md).
 
+## 1.2.1 (unreleased)
+
+### Fixes
+
+- Pulling a note with a Mermaid diagram no longer causes a conflict between the diagram's source and its image, and no longer downloads the rendered image into your vault. Pages published with an earlier version are fixed on their next pull.
+- **Publish changes** keeps wikilinks, such as `[[Other note]]`, to published notes that it doesn't republish. Before, those links became plain text in Confluence. Wikilinks now also go to the note that Obsidian opens when two notes have the same name.
+
 ## 1.2.0 (2026-09-23)
 
 ### Changes
