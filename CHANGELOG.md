@@ -2,6 +2,12 @@
 
 All notable changes to Confluence Integration Plus are listed here. For the history of the plugin this one was forked from, see the [markdown-confluence changelog](https://github.com/markdown-confluence/markdown-confluence/blob/main/CHANGELOG.md).
 
+## 1.2.3 (unreleased)
+
+### Fixes
+
+- **Publish changes** no longer rejects notes with "Confluence has changes that you haven't pulled" when nobody else edited the page. Notes that a publish sends only to keep the page tree in place, such as folder notes, now have their pull base updated too. To clear a note that is already affected, pull it once.
+
 ## 1.2.2 (2026-09-24)
 
 ### Fixes

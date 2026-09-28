@@ -486,13 +486,18 @@ export default class ConfluencePlugin extends Plugin {
 			failedFiles: [],
 			filesUploadResult: [],
 		};
+		const treeOnlyUploads: UploadResults["filesUploadResult"] = [];
 		for (const result of results) {
 			const path = toVaultPath(result.node.file.absoluteFilePath);
 			let uploaded = result.successfulUploadResult;
 			let reason = result.reason;
 			const editedByOtherUser = !uploaded && !!reason?.includes(EDITED_BY_OTHER_USER);
 			// Unchanged notes included only for the page tree aren't reported, unless they failed.
-			if (changed && !changed.has(path) && (uploaded || editedByOtherUser)) continue;
+			// Their pages may still get a new version, so their bases are recorded all the same.
+			if (changed && !changed.has(path) && (uploaded || editedByOtherUser)) {
+				if (uploaded) treeOnlyUploads.push(uploaded);
+				continue;
+			}
 			// The page was last edited by someone else, but that edit is exactly the version
 			// that was pulled and merged into this note, so it's safe to publish over it. A
 			// partial publish also applies the "Overwrite other users' edits" setting here.
@@ -516,7 +521,11 @@ export default class ConfluencePlugin extends Plugin {
 		}
 
 		uploadResults.failedFiles.push(
-			...(await this.recordPublishedBases(client, uploadResults.filesUploadResult, fingerprint)),
+			...(await this.recordPublishedBases(
+				client,
+				[...uploadResults.filesUploadResult, ...treeOnlyUploads],
+				fingerprint,
+			)),
 		);
 		return uploadResults;
 	}
