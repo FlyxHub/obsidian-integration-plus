@@ -2,6 +2,12 @@
 
 All notable changes to Confluence Integration Plus are listed here. For the history of the plugin this one was forked from, see the [markdown-confluence changelog](https://github.com/markdown-confluence/markdown-confluence/blob/main/CHANGELOG.md).
 
+## 1.2.4 (unreleased)
+
+### Fixes
+
+- Publishing no longer saves a new Confluence version of an unchanged page that links to a page in a personal space. Before, links to such pages lost the `~` in their space key, so every publish saw the page as changed.
+
 ## 1.2.3 (2026-09-28)
 
 ### Fixes
