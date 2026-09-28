@@ -32,6 +32,19 @@ Obsidian's developer policies require plugins to disclose the following behavior
 
 ## Install the plugin
 
+You can install the plugin from Obsidian's community plugin directory, or manually from GitHub.
+
+### Install from the community plugin directory
+
+1. In Obsidian, go to **Settings** > **Community plugins**.
+1. If restricted mode is on, click **Turn on community plugins**.
+1. Click **Browse**, and then search for **Confluence Integration Plus**.
+1. Click **Install**, and then click **Enable**.
+
+You can also open the plugin's page in the [community plugin directory](https://obsidian.md/plugins?id=confluence-integration-plus) and click **Install**.
+
+### Install manually from GitHub
+
 1. From the [releases page](https://github.com/FlyxHub/obsidian-integration-plus/releases), download `main.js`, `manifest.json`, and `styles.css`.
 1. In your vault, create the folder `.obsidian/plugins/confluence-integration-plus`.
 1. Copy the three files into that folder.
