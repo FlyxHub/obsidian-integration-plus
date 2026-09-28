@@ -42,6 +42,7 @@ import { krokiFetch } from "./KrokiFetch";
 import { loadMermaidStyles, type MermaidStyles } from "./mermaidStyles";
 import { toVaultPath } from "./paths";
 import { isExcluded, publishFlagFor } from "./publishSelection";
+import { pageUrlsById, restoreSmartLinkUrls } from "./smartLinks";
 import { wikilinksToPageLinks, type PageUrlLookup } from "./wikilinks";
 import { createAttachmentDownloader } from "./sync/attachmentDownload";
 import { createConfluenceRemote, type AttachmentDownload } from "./sync/confluenceRemote";
@@ -592,6 +593,16 @@ export default class ConfluencePlugin extends Plugin {
 		const plugins: ADFProcessingPlugin<unknown, unknown>[] = [
 			new MathRendererPlugin(new ElectronMathRenderer()),
 			new MermaidRendererPlugin(mermaidRenderer),
+			restoreSmartLinkUrls(
+				pageUrlsById(
+					this.app.vault
+						.getMarkdownFiles()
+						.map(
+							(file): unknown =>
+								this.app.metadataCache.getFileCache(file)?.frontmatter?.[PAGE_URL_KEY],
+						),
+				),
+			),
 		];
 
 		if (settings.kroki?.enabled)
