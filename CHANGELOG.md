@@ -2,6 +2,12 @@
 
 All notable changes to Confluence Integration Plus are listed here. For the history of the plugin this one was forked from, see the [markdown-confluence changelog](https://github.com/markdown-confluence/markdown-confluence/blob/main/CHANGELOG.md).
 
+## 1.2.7 (unreleased)
+
+### Fixes
+
+- The bundled `prosemirror-view` is upgraded from 1.41.5 to 1.42.6, outside the range of security advisory [GHSA-c8x8-7fp4-3x9w](https://github.com/advisories/GHSA-c8x8-7fp4-3x9w). Atlassian's document format library pins the older version.
+
 ## 1.2.6 (2026-10-07)
 
 ### Changes
