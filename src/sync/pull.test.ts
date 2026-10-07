@@ -36,7 +36,7 @@ function fakeRemote(pages: RemotePage[], children: Record<string, RemoteChild[]>
 			new Map(
 				ids.flatMap((id) => {
 					const page = byId.get(id);
-					return page ? [[id, { version: page.version }] as const] : [];
+					return page ? [[id, page.version] as const] : [];
 				}),
 			),
 		listChildren: async (id) => children[id] ?? [],
@@ -482,7 +482,9 @@ test("reuses downloaded and published images instead of downloading again", asyn
 			content: [{ type: "media", attrs: { id, type: "file", collection: "contentId-5" } }],
 		})),
 	});
-	expect(await sync.ensure(adfWith("known", "published"), { download: false })).toEqual([]);
+	expect(
+		await sync.ensure(adfWith("known", "published"), { download: false, diagrams: new Map() }),
+	).toEqual([]);
 	const resolve = sync.resolver();
 	expect(resolve("known")).toBe("![[diagram.png]]");
 	expect(resolve("published")).toBe("![[local.png]]");

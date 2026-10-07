@@ -48,7 +48,7 @@ export async function checkBeforePublish(
 	});
 	const versions = await remote.getVersions(withBase.map((note) => note.pageId));
 	for (const { path, pageId, baseVersion } of withBase) {
-		const remoteVersion = versions.get(pageId)?.version;
+		const remoteVersion = versions.get(pageId);
 		if (remoteVersion === undefined) continue;
 		if (remoteVersion > baseVersion) blocked.push({ fileName: path, reason: NEEDS_PULL });
 		else if (remoteVersion === baseVersion) upToDate.add(path);

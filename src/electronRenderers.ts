@@ -9,9 +9,8 @@ import {
 	type MermaidOptions,
 	type MermaidRenderer,
 } from "@markdown-confluence/lib";
-import type { MermaidConfig } from "mermaid";
 import { loadMermaid } from "obsidian";
-import type { ObsidianMermaid } from "./mermaidStyles";
+import type { MermaidStyles, ObsidianMermaid } from "./mermaidStyles";
 
 /*
  * Renderers for publishing, adapted from `@markdown-confluence/mermaid-electron-renderer`
@@ -22,46 +21,6 @@ import type { ObsidianMermaid } from "./mermaidStyles";
 /** Theme variable values that Mermaid can't compute colors from; fonts may use them. */
 const CSS_FUNCTION = /\b(?:color-mix|light-dark|var)\(/iu;
 const FONT_VARIABLE = /^font/iu;
-
-const DEFAULT_MERMAID_CONFIG: MermaidConfig = {
-	theme: "base",
-	themeVariables: {
-		background: "#ffffff",
-		mainBkg: "#ddebff",
-		primaryColor: "#ddebff",
-		primaryTextColor: "#192b50",
-		primaryBorderColor: "#0052cc",
-		secondaryColor: "#ff8f73",
-		secondaryTextColor: "#192b50",
-		secondaryBorderColor: "#df360c",
-		tertiaryColor: "#c0b6f3",
-		tertiaryTextColor: "#fefefe",
-		tertiaryBorderColor: "#5243aa",
-		noteBkgColor: "#ffc403",
-		noteTextColor: "#182a4e",
-		textColor: "#ff0000",
-		titleColor: "#0052cc",
-	},
-};
-
-type ThemeVariables = Record<string, unknown>;
-
-/** Split off the theme variables, dropping those that are CSS functions but keeping fonts. */
-function splitThemeVariables(config: MermaidConfig): {
-	config: MermaidConfig;
-	themeVariables: ThemeVariables | undefined;
-} {
-	const rest = { ...config };
-	const variables = rest.themeVariables as ThemeVariables | undefined;
-	delete rest.themeVariables;
-	const kept = Object.fromEntries(
-		Object.entries(variables ?? {}).filter(
-			([name, value]) =>
-				!(typeof value === "string" && !FONT_VARIABLE.test(name) && CSS_FUNCTION.test(value)),
-		),
-	);
-	return { config: rest, themeVariables: Object.keys(kept).length > 0 ? kept : undefined };
-}
 
 export class ElectronMathRenderer implements MathRenderer {
 	async captureMath(expressions: MathExpression[]): Promise<Map<string, Buffer>> {
@@ -100,10 +59,7 @@ export class ElectronMermaidRenderer implements MermaidRenderer {
 	readonly format: "png" | "svg";
 
 	constructor(
-		private readonly extraStyleSheets: string[],
-		private readonly extraStyles: string[],
-		private readonly mermaidConfig: MermaidConfig = DEFAULT_MERMAID_CONFIG,
-		private readonly bodyClasses = "",
+		private readonly styles: MermaidStyles,
 		private readonly renderOptions: MermaidOptions = {},
 	) {
 		validateMermaidOptions(renderOptions);
@@ -117,18 +73,18 @@ export class ElectronMermaidRenderer implements MermaidRenderer {
 		// Obsidian renders notes with this same Mermaid, so put its configuration back after.
 		const obsidianConfig = mermaid.mermaidAPI.getConfig();
 		try {
-			const { config, themeVariables } = splitThemeVariables({
-				...this.mermaidConfig,
-				...(this.renderOptions.theme ? { theme: this.renderOptions.theme } : {}),
-				themeVariables: {
-					...(this.mermaidConfig.themeVariables as ThemeVariables | undefined),
-					...this.renderOptions.themeVariables,
-				},
-				securityLevel: "strict",
-			});
+			// Drop theme variables that are CSS functions, which Mermaid can't compute colors from.
+			const themeVariables = Object.fromEntries(
+				Object.entries(this.renderOptions.themeVariables ?? {}).filter(
+					([name, value]) =>
+						!(typeof value === "string" && !FONT_VARIABLE.test(name) && CSS_FUNCTION.test(value)),
+				),
+			);
 			mermaid.initialize({
-				...config,
-				...(themeVariables ? { themeVariables } : {}),
+				...this.styles.mermaidConfig,
+				...(this.renderOptions.theme ? { theme: this.renderOptions.theme } : {}),
+				...(Object.keys(themeVariables).length > 0 ? { themeVariables } : {}),
+				securityLevel: "strict",
 				startOnLoad: false,
 				suppressErrorRendering: true,
 			});
@@ -178,13 +134,12 @@ export class ElectronMermaidRenderer implements MermaidRenderer {
   <head>
     <meta charset="UTF-8" />
     <title>Mermaid Chart</title>
-	${this.extraStyleSheets.map((sheet) => `<link href="${sheet}" type="text/css" rel="stylesheet"/>`).join("\n")}
-	${`
-		<style>
-		${this.extraStyles.join("\n")}
-		</style>`}
+	${this.styles.extraStyleSheets.map((sheet) => `<link href="${sheet}" type="text/css" rel="stylesheet"/>`).join("\n")}
+	<style>
+	${this.styles.extraStyles.join("\n")}
+	</style>
   </head>
-  <body class="${this.bodyClasses}">
+  <body class="${this.styles.bodyStyles}">
   	<div id="graphDiv"></div>
     <script type="text/javascript">
 	window.renderSvg = (svg) => {

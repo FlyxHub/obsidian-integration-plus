@@ -56,6 +56,11 @@ export function createObsidianPullVault(
 		return file;
 	};
 
+	const assignFrontmatter = (file: TFile, values: Record<string, string>) =>
+		app.fileManager.processFrontMatter(file, (frontmatter: Record<string, unknown>) => {
+			Object.assign(frontmatter, values);
+		});
+
 	const ensureFolder = async (path: string) => {
 		if (!path) return;
 		const existing = app.vault.getAbstractFileByPath(path);
@@ -94,14 +99,7 @@ export function createObsidianPullVault(
 			});
 		},
 
-		async setFrontmatter(path, values) {
-			await app.fileManager.processFrontMatter(
-				fileAt(path),
-				(frontmatter: Record<string, unknown>) => {
-					Object.assign(frontmatter, values);
-				},
-			);
-		},
+		setFrontmatter: (path, values) => assignFrontmatter(fileAt(path), values),
 
 		exists: (path) => app.vault.getAbstractFileByPath(normalizePath(path)) !== null,
 
@@ -110,11 +108,7 @@ export function createObsidianPullVault(
 		async create(path, body, frontmatter) {
 			const notePath = normalizePath(path);
 			await ensureFolder(parentOf(notePath));
-			const file = await app.vault.create(notePath, body);
-			if (!(file instanceof TFile)) throw new Error(`Could not create ${notePath}.`);
-			await app.fileManager.processFrontMatter(file, (values: Record<string, unknown>) => {
-				Object.assign(values, frontmatter);
-			});
+			await assignFrontmatter(await app.vault.create(notePath, body), frontmatter);
 		},
 	};
 }

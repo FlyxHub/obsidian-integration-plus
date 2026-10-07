@@ -19,7 +19,7 @@ export const MERMAID_THEMES = {
 export type MermaidTheme = keyof typeof MERMAID_THEMES;
 
 export function isMermaidTheme(value: string): value is MermaidTheme {
-	return Object.prototype.hasOwnProperty.call(MERMAID_THEMES, value);
+	return Object.hasOwn(MERMAID_THEMES, value);
 }
 
 export interface ObsidianPluginSettings
@@ -193,6 +193,6 @@ function uniqueSecretName(storage: SecretStorage, base: string): string {
 	return name;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }

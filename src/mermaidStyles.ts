@@ -1,6 +1,11 @@
 import { App, Vault, loadMermaid, normalizePath } from "obsidian";
-import type { MermaidConfig } from "mermaid";
 import type { MermaidTheme } from "./settings";
+
+/** The parts of a Mermaid config that publishing reads; the rest is passed through. */
+type MermaidConfig = Record<string, unknown> & {
+	theme?: string;
+	themeVariables?: Record<string, unknown>;
+};
 
 /** What the Electron Mermaid renderer needs to draw diagrams the way the chosen theme looks. */
 export interface MermaidStyles {

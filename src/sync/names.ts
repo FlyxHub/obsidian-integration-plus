@@ -5,10 +5,8 @@ const RESERVED_WINDOWS_NAMES = /^(con|prn|aux|nul|com\d|lpt\d)$/i;
  * separators, characters Obsidian or the OS reject, and leading dots are all removed.
  */
 export function toNoteName(title: string, pageId: string): string {
-	let name = [...title]
-		.map((char) => (char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127 ? "-" : char))
-		.join("")
-		.replace(/[\\/:*?"<>|#^[\]]/g, "-")
+	let name = title
+		.replace(/[\p{Cc}\\/:*?"<>|#^[\]]/gu, "-")
 		.replace(/\s+/g, " ")
 		.trim()
 		.replace(/^[.\s]+|[.\s]+$/g, "")

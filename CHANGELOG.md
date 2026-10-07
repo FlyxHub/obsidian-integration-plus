@@ -2,6 +2,12 @@
 
 All notable changes to Confluence Integration Plus are listed here. For the history of the plugin this one was forked from, see the [markdown-confluence changelog](https://github.com/markdown-confluence/markdown-confluence/blob/main/CHANGELOG.md).
 
+## 1.2.5 (unreleased)
+
+### Changes
+
+- Internal cleanup that removes unused code and simplifies several modules. Publishing, pulling and settings work as before.
+
 ## 1.2.4 (2026-09-28)
 
 ### Fixes

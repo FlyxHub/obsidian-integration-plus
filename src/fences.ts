@@ -16,3 +16,26 @@ export function createFenceTracker(): (line: string) => boolean {
 		return true;
 	};
 }
+
+/**
+ * Rewrite Markdown outside code: fenced blocks and inline code are left alone, and `rewrite`
+ * gets each other segment of a line, with the whole line.
+ */
+export function mapOutsideCode(
+	markdown: string,
+	rewrite: (text: string, line: string) => string,
+): string {
+	const inCode = createFenceTracker();
+	return markdown
+		.split("\n")
+		.map((line) =>
+			inCode(line)
+				? line
+				: // Odd segments of a backtick split are inline code.
+					line
+						.split("`")
+						.map((segment, index) => (index % 2 === 1 ? segment : rewrite(segment, line)))
+						.join("`"),
+		)
+		.join("\n");
+}

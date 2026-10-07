@@ -1,5 +1,4 @@
 import esbuild from "esbuild";
-import process from "process";
 import { builtinModules } from "node:module";
 
 const banner = `/*
@@ -50,31 +49,14 @@ const context = await esbuild.context({
 	external: [
 		"obsidian",
 		"electron",
-		"@codemirror/autocomplete",
-		"@codemirror/collab",
-		"@codemirror/commands",
-		"@codemirror/language",
-		"@codemirror/lint",
-		"@codemirror/search",
-		"@codemirror/state",
-		"@codemirror/view",
-		"@lezer/common",
-		"@lezer/highlight",
-		"@lezer/lr",
 		...builtinModules,
 		...builtinModules.map((name) => `node:${name}`),
-		// Built-ins that exist only with the node: prefix, which builtinModules may leave out.
-		"node:sea",
-		"node:sqlite",
-		"node:test",
-		"node:test/reporters",
 	],
 	format: "cjs",
 	platform: "browser",
 	target: "chrome106",
 	logLevel: "info",
 	sourcemap: prod ? false : "inline",
-	treeShaking: true,
 	minify: prod,
 	define: {
 		"process.env.NODE_ENV": JSON.stringify(prod ? "production" : "development"),

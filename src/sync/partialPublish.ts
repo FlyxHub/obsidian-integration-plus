@@ -1,6 +1,6 @@
 import { MarkdownWorkspaceService } from "@markdown-confluence/lib";
 import { Effect, Layer } from "effect";
-import { baseName, parentOf, toVaultPath } from "../paths";
+import { baseName, joinPath, parentOf, toVaultPath } from "../paths";
 
 /**
  * Choosing the notes to hand the publisher when only some notes changed.
@@ -80,9 +80,8 @@ export function isFolderNote(path: string): boolean {
 
 /** The note that supplies a folder's page: named like the folder, or index/README. */
 function folderNoteOf(folder: string, all: ReadonlySet<string>): string | undefined {
-	const prefix = folder ? `${folder}/` : "";
 	const names = [baseName(folder), ...FOLDER_NOTE_NAMES].filter(Boolean);
-	return names.map((name) => `${prefix}${name}.md`).find((path) => all.has(path));
+	return names.map((name) => joinPath(folder, `${name}.md`)).find((path) => all.has(path));
 }
 
 function isWithin(folder: string, root: string): boolean {

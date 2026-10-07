@@ -1,8 +1,9 @@
 import { getMermaidFileName, parseMarkdownToADF } from "@markdown-confluence/lib";
 import { errorMessage } from "../errors";
-import { baseName } from "../paths";
+import { baseName, joinPath } from "../paths";
 import { createLinkTextIndex } from "./pageLinks";
 import { toNoteName } from "./names";
+import type { SyncStateStore } from "./syncState";
 
 export interface RemoteAttachment {
 	id: string;
@@ -24,17 +25,8 @@ export interface MediaVault {
 	writeBinary(path: string, data: Uint8Array): Promise<void>;
 }
 
-/** Media file ID → vault path of the downloaded or published file. */
-export interface MediaMapStore {
-	getMedia(): Promise<Record<string, string>>;
-	setMedia(map: Record<string, string>): Promise<void>;
-}
-
 /** Returns the Markdown for a media file ID, or undefined if it has no local equivalent. */
 export type MediaResolver = (fileId: string) => string | undefined;
-
-/** Attachment title of a rendered diagram → the Markdown block it was rendered from. */
-export type DiagramSources = ReadonlyMap<string, string>;
 
 /** The publisher uploads a local file as `<32-hex hash>-<file name>`. */
 const PUBLISHED_ATTACHMENT = /^[0-9a-f]{32}-(.+)$/;
@@ -54,7 +46,7 @@ export class MediaSync {
 	constructor(
 		private readonly remote: MediaRemote,
 		private readonly vault: MediaVault,
-		private readonly store: MediaMapStore,
+		private readonly store: Pick<SyncStateStore, "getMedia" | "setMedia">,
 		private readonly folder: string,
 	) {}
 
@@ -82,10 +74,11 @@ export class MediaSync {
 	 */
 	async ensure(
 		adf: unknown,
-		options: { download: boolean; diagrams?: DiagramSources },
+		/** `diagrams`: attachment title of a rendered diagram → the block it was rendered from. */
+		options: { download: boolean; diagrams: ReadonlyMap<string, string> },
 	): Promise<string[]> {
 		const map = await this.loadMap();
-		const diagrams = options.diagrams ?? new Map<string, string>();
+		const { diagrams } = options;
 		const errors: string[] = [];
 		let changed = false;
 		for (const { fileId, pageId } of mediaReferences(adf)) {
@@ -131,12 +124,9 @@ export class MediaSync {
 	}
 
 	private listAttachments(pageId: string) {
-		let pending = this.attachments.get(pageId);
-		if (!pending) {
-			pending = this.remote.listAttachments(pageId);
-			this.attachments.set(pageId, pending);
-		}
-		return pending;
+		if (!this.attachments.has(pageId))
+			this.attachments.set(pageId, this.remote.listAttachments(pageId));
+		return this.attachments.get(pageId)!;
 	}
 
 	private findFileNamed(name: string): string | undefined {
@@ -160,10 +150,9 @@ export class MediaSync {
 	/** A safe, unused path in the image folder, keeping the attachment's file name. */
 	private availablePath(title: string, attachmentId: string): string {
 		const { name, extension } = safeFileName(title, attachmentId);
-		const prefix = this.folder ? `${this.folder}/` : "";
-		let path = `${prefix}${name}${extension}`;
+		let path = joinPath(this.folder, `${name}${extension}`);
 		for (let copy = 1; this.vault.exists(path); copy++)
-			path = `${prefix}${name} ${copy}${extension}`;
+			path = joinPath(this.folder, `${name} ${copy}${extension}`);
 		return path;
 	}
 }

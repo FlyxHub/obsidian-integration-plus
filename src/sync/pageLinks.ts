@@ -1,5 +1,5 @@
 import { resolveConfluencePageId } from "@markdown-confluence/lib";
-import { createFenceTracker } from "../fences";
+import { mapOutsideCode } from "../fences";
 import { baseName, decodeLink } from "../paths";
 
 /** Returns the wikilink target for a Confluence page ID, or undefined if no note has it. */
@@ -26,30 +26,20 @@ export function rewritePageLinks(
 	resolve: PageLinkResolver,
 ): RewrittenLinks {
 	const unresolved = new Set<string>();
-	const inCode = createFenceTracker();
-	const lines = markdown.split("\n").map((line) => {
-		if (inCode(line)) return line;
-		const separator = TABLE_ROW.test(line) ? "\\|" : "|";
-		// Odd segments of a backtick split are inline code.
-		return line
-			.split("`")
-			.map((segment, index) =>
-				index % 2 === 1
-					? segment
-					: segment.replace(MARKDOWN_LINK, (link, text: string, href: string) => {
-							const target = pageLinkTarget(href, siteUrl);
-							if (!target) return link;
-							const linkText = resolve(target.pageId);
-							if (!linkText) {
-								unresolved.add(target.pageId);
-								return link;
-							}
-							return toWikilink(linkText, target.anchor, text, href, separator) ?? link;
-						}),
-			)
-			.join("`");
-	});
-	return { markdown: lines.join("\n"), unresolved: [...unresolved] };
+	const rewritten = mapOutsideCode(markdown, (segment, line) =>
+		segment.replace(MARKDOWN_LINK, (link, text: string, href: string) => {
+			const target = pageLinkTarget(href, siteUrl);
+			if (!target) return link;
+			const linkText = resolve(target.pageId);
+			if (!linkText) {
+				unresolved.add(target.pageId);
+				return link;
+			}
+			const separator = TABLE_ROW.test(line) ? "\\|" : "|";
+			return toWikilink(linkText, target.anchor, text, href, separator) ?? link;
+		}),
+	);
+	return { markdown: rewritten, unresolved: [...unresolved] };
 }
 
 /** The page ID and heading anchor of a link to a page on this Confluence site. */
