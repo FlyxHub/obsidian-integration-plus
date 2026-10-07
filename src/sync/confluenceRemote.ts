@@ -9,10 +9,6 @@ export interface RemotePage {
 	adf: unknown;
 }
 
-export interface RemoteVersion {
-	version: number;
-}
-
 export interface RemoteChild {
 	id: string;
 	title: string;
@@ -24,7 +20,7 @@ export interface ConfluenceRemote {
 	/** The page with its ADF body, or undefined if it no longer exists. */
 	getPage(id: string): Promise<RemotePage | undefined>;
 	/** Current versions for existing pages; deleted or inaccessible pages are left out. */
-	getVersions(ids: readonly string[]): Promise<Map<string, RemoteVersion>>;
+	getVersions(ids: readonly string[]): Promise<Map<string, number>>;
 	listChildren(id: string): Promise<RemoteChild[]>;
 }
 
@@ -83,7 +79,7 @@ export function createConfluenceRemote(
 		},
 
 		async getVersions(ids) {
-			const versions = new Map<string, RemoteVersion>();
+			const versions = new Map<string, number>();
 			for (let start = 0; start < ids.length; start += BATCH_SIZE) {
 				const batch = ids.slice(start, start + BATCH_SIZE);
 				const response = await client.sendRequest<unknown>({
@@ -94,7 +90,7 @@ export function createConfluenceRemote(
 				for (const entry of resultsOf(response)) {
 					const version = recordOf(entry["version"]);
 					if (typeof entry["id"] !== "string" || typeof version["number"] !== "number") continue;
-					versions.set(entry["id"], { version: version["number"] });
+					versions.set(entry["id"], version["number"]);
 				}
 			}
 			return versions;

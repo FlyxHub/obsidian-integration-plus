@@ -9,6 +9,11 @@ export function parentOf(path: string): string {
 	return index === -1 ? "" : path.slice(0, index);
 }
 
+/** A name inside a folder; `folder` is `""` at the vault root. */
+export function joinPath(folder: string, name: string): string {
+	return folder ? `${folder}/${name}` : name;
+}
+
 /** The file name part of a vault path, with its extension. */
 export function baseName(path: string): string {
 	return path.slice(path.lastIndexOf("/") + 1);

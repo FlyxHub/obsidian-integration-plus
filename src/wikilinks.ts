@@ -1,4 +1,4 @@
-import { createFenceTracker } from "./fences";
+import { mapOutsideCode } from "./fences";
 
 /** Returns the Confluence page URL of the note a wikilink points to, if it was published. */
 export type PageUrlLookup = (linkpath: string) => string | undefined;
@@ -13,24 +13,11 @@ const WIKILINK = /(!?)\[\[([^\]\n]+)\]\]/g;
  * Embeds, code blocks and inline code are left alone.
  */
 export function wikilinksToPageLinks(markdown: string, pageUrl: PageUrlLookup): string {
-	const inCode = createFenceTracker();
-	return markdown
-		.split("\n")
-		.map((line) =>
-			inCode(line)
-				? line
-				: line
-						.split("`")
-						.map((segment, index) =>
-							index % 2 === 1
-								? segment
-								: segment.replace(WIKILINK, (link, embed: string, inner: string) =>
-										embed ? link : (toPageLink(inner, pageUrl) ?? link),
-									),
-						)
-						.join("`"),
-		)
-		.join("\n");
+	return mapOutsideCode(markdown, (text) =>
+		text.replace(WIKILINK, (link, embed: string, inner: string) =>
+			embed ? link : (toPageLink(inner, pageUrl) ?? link),
+		),
+	);
 }
 
 function toPageLink(inner: string, pageUrl: PageUrlLookup): string | undefined {

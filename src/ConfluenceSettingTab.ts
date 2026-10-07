@@ -14,6 +14,7 @@ import {
 	MERMAID_THEMES,
 	describeSettingsIssue,
 	isMermaidTheme,
+	isRecord,
 	usesBrowserLogin,
 	withBearerToken,
 	type ObsidianPluginSettings,
@@ -207,7 +208,7 @@ export class ConfluenceSettingTab extends PluginSettingTab {
 				'JSON object, for example {"X-Custom-Header":"value"}. Stored in plain text in plugin data, so do not put credentials here.',
 				() => formatRequestHeaders(settings.confluenceRequestHeaders),
 				(value) => {
-					const headers = parseRequestHeaders(value);
+					const headers = parseStringRecord(value);
 					if (!headers) return false;
 					settings.confluenceRequestHeaders = headers;
 					return true;
@@ -517,20 +518,11 @@ function formatRequestHeaders(headers: Record<string, string>): string {
 	return Object.keys(headers).length === 0 ? "" : JSON.stringify(headers, null, 2);
 }
 
-function parseRequestHeaders(value: string): Record<string, string> | undefined {
-	return value.trim() ? parseStringRecord(value) : {};
-}
-
 /** Parse a JSON object whose values are all strings; undefined while the input is invalid. */
 function parseStringRecord(value: string): Record<string, string> | undefined {
 	try {
 		const parsed: unknown = JSON.parse(value.trim() || "{}");
-		if (
-			parsed !== null &&
-			typeof parsed === "object" &&
-			!Array.isArray(parsed) &&
-			Object.values(parsed).every((entry) => typeof entry === "string")
-		)
+		if (isRecord(parsed) && Object.values(parsed).every((entry) => typeof entry === "string"))
 			return parsed as Record<string, string>;
 	} catch {
 		// Keep the last valid value while the user is still typing.

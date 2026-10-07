@@ -7,15 +7,9 @@ type PageConfigKey = keyof PageConfig;
 /** The per-page frontmatter settings the form edits, as the lib defines them. */
 const config = ConfluencePageConfig.conniePerPageConfig;
 
-export type ConfluencePerPageUIValues = {
-	[K in PageConfigKey]: {
-		value: PageConfig[K]["default"] | undefined;
-		isSet: boolean;
-	};
-};
-
 type FieldValue = string | boolean | string[] | undefined;
 type FieldState = { value: FieldValue; isSet: boolean };
+export type ConfluencePerPageUIValues = Record<PageConfigKey, FieldState>;
 type Field = ConfluencePageConfig.FrontmatterConfig<unknown, ConfluencePageConfig.InputType>;
 
 /** Frontmatter is user-edited YAML, so coerce each value to what its input can display. */
@@ -134,7 +128,7 @@ export class ConfluencePerPageForm extends Modal {
 
 	override onOpen() {
 		this.setTitle("Confluence page settings");
-		const values: Record<string, FieldState> = { ...this.modalProps.initialValues };
+		const values = { ...this.modalProps.initialValues };
 		const errors = new Map<PageConfigKey, Error[]>();
 
 		const form = this.contentEl.createEl("form", { cls: "confluence-page-settings" });
@@ -154,7 +148,7 @@ export class ConfluencePerPageForm extends Modal {
 			let errorRow: HTMLElement | undefined;
 
 			const update = (change: Partial<FieldState>) => {
-				const next = { ...values[property]!, ...change };
+				const next = { ...values[property], ...change };
 				values[property] = next;
 				const validation = config[property].inputValidator(next.value);
 				errors.set(property, validation.valid ? [] : validation.errors);
@@ -172,20 +166,18 @@ export class ConfluencePerPageForm extends Modal {
 				save.disabled = [...errors.values()].some((list) => list.length > 0);
 			};
 
-			renderInput(valueCell, property, field, values[property]!.value, (value) =>
-				update({ value }),
-			);
+			renderInput(valueCell, property, field, values[property].value, (value) => update({ value }));
 			const setInput = row.createEl("td").createEl("input", {
 				type: "checkbox",
 				attr: { "aria-label": `Write ${field.key} to frontmatter` },
 			});
-			setInput.checked = values[property]!.isSet;
+			setInput.checked = values[property].isSet;
 			setInput.addEventListener("change", () => update({ isSet: setInput.checked }));
 		}
 
 		form.addEventListener("submit", (event) => {
 			event.preventDefault();
-			void this.modalProps.onSubmit(values as ConfluencePerPageUIValues, () => this.close());
+			void this.modalProps.onSubmit(values, () => this.close());
 		});
 	}
 

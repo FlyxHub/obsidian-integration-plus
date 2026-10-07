@@ -1,6 +1,6 @@
 import { errorMessage } from "../errors";
 import { PAGE_ID_KEY, PAGE_TITLE_KEY } from "../frontmatterKeys";
-import { parentOf } from "../paths";
+import { joinPath, parentOf } from "../paths";
 import { MERGE_FORMAT, adfToMergeMarkdown } from "./adfMarkdown";
 import type { ConfluenceRemote, RemoteChild, RemotePage } from "./confluenceRemote";
 import { mediaReferences, mermaidDiagrams, type MediaResolver, type MediaSync } from "./media";
@@ -80,7 +80,7 @@ export function convertPage(
 	adf: unknown,
 	urls: SiteUrls,
 	resolve: PageLinkResolver,
-	media: MediaResolver = () => undefined,
+	media: MediaResolver,
 ): ConvertedPage {
 	const { markdown, unresolved } = rewritePageLinks(
 		adfToMergeMarkdown(adf, urls.confluenceBaseUrl, media),
@@ -146,7 +146,7 @@ export class PullService {
 			if (!path) continue;
 			options.onProgress?.(`Pulling ${index + 1} of ${ids.length}: ${path}`);
 			try {
-				await this.pullNote(pageId, path, versions.get(pageId)?.version, options, resolve, report);
+				await this.pullNote(pageId, path, versions.get(pageId), options, resolve, report);
 			} catch (error) {
 				report.skipped.push({ name: path, reason: errorMessage(error) });
 			}
@@ -156,7 +156,13 @@ export class PullService {
 			options.signal?.throwIfAborted();
 			options.onProgress?.(`Importing ${path}`);
 			try {
-				const converted = await this.convertForPull(page, path, options, resolve, report, []);
+				const converted = await this.convert(
+					page,
+					options,
+					resolve,
+					[],
+					this.imageSkipped(report, path),
+				);
 				await this.vault.create(path, converted.markdown, frontmatter);
 				await this.recordBase(page, converted, await this.vault.fingerprint(path));
 				report.imported.push(path);
@@ -192,7 +198,7 @@ export class PullService {
 				if (!page) continue;
 				const path = linked.get(pageId);
 				const sources = path ? [await this.vault.read(path)] : [];
-				const { converted } = await this.convert(page, urls, resolve, false, sources);
+				const converted = await this.convert(page, urls, resolve, sources);
 				await this.recordBase(page, converted, fingerprint);
 			} catch (error) {
 				failures.push({ pageId, reason: errorMessage(error) });
@@ -243,10 +249,13 @@ export class PullService {
 		const wasInSync =
 			base?.localFingerprint !== undefined &&
 			(await this.vault.fingerprint(path)) === base.localFingerprint;
-		const remote = await this.convertForPull(page, path, options, resolve, report, [
-			local,
-			base?.markdown ?? "",
-		]);
+		const remote = await this.convert(
+			page,
+			options,
+			resolve,
+			[local, base?.markdown ?? ""],
+			this.imageSkipped(report, path),
+		);
 		const { frontmatter, body } = splitFrontmatter(local);
 		let merged;
 		if (base) {
@@ -376,37 +385,28 @@ export class PullService {
 
 	/**
 	 * Make the page's images local, then convert it. Diagrams rendered from Mermaid blocks in
-	 * `sources` (the note and its base) convert back to those blocks. Image failures are
-	 * returned, not thrown.
+	 * `sources` (the note and its base) convert back to those blocks. Images are downloaded
+	 * only when `onImageError` is given, which receives the failures instead of throwing.
 	 */
 	private async convert(
 		page: RemotePage,
 		urls: SiteUrls,
 		resolve: PageLinkResolver,
-		download: boolean,
 		sources: readonly string[],
-	): Promise<{ converted: ConvertedPage; imageErrors: string[] }> {
+		onImageError?: (error: string) => void,
+	): Promise<ConvertedPage> {
 		const imageErrors = await this.media.ensure(page.adf, {
-			download,
+			download: onImageError !== undefined,
 			diagrams: mermaidDiagrams(sources, urls.confluenceBaseUrl),
 		});
-		const converted = convertPage(page.adf, urls, resolve, this.media.resolver());
-		return { converted, imageErrors };
+		for (const error of imageErrors) onImageError?.(error);
+		return convertPage(page.adf, urls, resolve, this.media.resolver());
 	}
 
-	/** Convert with image downloads, reporting images that failed against the note. */
-	private async convertForPull(
-		page: RemotePage,
-		path: string,
-		urls: SiteUrls,
-		resolve: PageLinkResolver,
-		report: PullReport,
-		sources: readonly string[],
-	): Promise<ConvertedPage> {
-		const { converted, imageErrors } = await this.convert(page, urls, resolve, true, sources);
-		for (const error of imageErrors)
+	/** Reports an image that wasn't downloaded against the note. */
+	private imageSkipped(report: PullReport, path: string) {
+		return (error: string) =>
 			report.skipped.push({ name: path, reason: `An image wasn't downloaded: ${error}` });
-		return converted;
 	}
 
 	private async recordBase(
@@ -437,12 +437,9 @@ function inferRootFolder(
 	rootChildren: RemoteChild[],
 	pathsById: Map<string, string>,
 ): string | undefined {
-	for (const child of rootChildren) {
-		const path = pathsById.get(child.id);
-		if (!path) continue;
-		return isFolderNote(path) ? parentOf(parentOf(path)) : parentOf(path);
-	}
-	return undefined;
+	const path = rootChildren.map((child) => pathsById.get(child.id)).find(Boolean);
+	if (!path) return undefined;
+	return isFolderNote(path) ? parentOf(parentOf(path)) : parentOf(path);
 }
 
 /** The publisher's generated folder pages contain only a Page Tree macro. */
@@ -453,8 +450,4 @@ export function isGeneratedFolderPage(adf: unknown): boolean {
 	if (!Array.isArray(inline) || inline.length !== 1) return false;
 	const node = inline[0] as { type?: string; attrs?: { extensionKey?: string } };
 	return node.type === "inlineExtension" && node.attrs?.extensionKey === "pagetree";
-}
-
-function joinPath(folder: string, name: string): string {
-	return folder ? `${folder}/${name}` : name;
 }

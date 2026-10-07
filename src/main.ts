@@ -247,7 +247,6 @@ export default class ConfluencePlugin extends Plugin {
 	private async readLegacySettings(): Promise<unknown> {
 		const path = normalizePath(`${this.app.vault.configDir}/plugins/${LEGACY_PLUGIN_ID}/data.json`);
 		try {
-			if (!(await this.app.vault.adapter.exists(path))) return undefined;
 			return JSON.parse(await this.app.vault.adapter.read(path)) as unknown;
 		} catch {
 			return undefined;
@@ -582,13 +581,7 @@ export default class ConfluencePlugin extends Plugin {
 		overrides: Partial<ObsidianPluginSettings> = {},
 	) {
 		const settings = { ...this.resolvedSettings(), ...overrides };
-		const mermaidRenderer = new ElectronMermaidRenderer(
-			mermaidStyles.extraStyleSheets,
-			mermaidStyles.extraStyles,
-			mermaidStyles.mermaidConfig,
-			mermaidStyles.bodyStyles,
-			settings.mermaid,
-		);
+		const mermaidRenderer = new ElectronMermaidRenderer(mermaidStyles, settings.mermaid);
 
 		const plugins: ADFProcessingPlugin<unknown, unknown>[] = [
 			new MathRendererPlugin(new ElectronMathRenderer()),
@@ -703,7 +696,7 @@ export default class ConfluencePlugin extends Plugin {
 
 	private showPublishResults(uploadResults: UploadResults) {
 		if (this.settings.showPublishResultsModal) {
-			new CompletedModal(this.app, { uploadResults }).open();
+			new CompletedModal(this.app, uploadResults).open();
 			return;
 		}
 		new Notice(getPublishResultsMessage(uploadResults), 10000);

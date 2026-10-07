@@ -12,14 +12,9 @@ export interface UploadResults {
 	filesUploadResult: UploadAdfFileResult[];
 }
 
-interface UploadResultsProps {
-	uploadResults: UploadResults;
-}
-
 /** Page URLs come from the Confluence API; only link to web pages. */
 function safePageUrl(url: string | undefined): string | undefined {
-	if (!url || !URL.canParse(url)) return undefined;
-	return new URL(url).protocol === "https:" ? url : undefined;
+	return url && URL.parse(url)?.protocol === "https:" ? url : undefined;
 }
 
 /** The parts of a page the publisher reports on, with their labels in the results. */
@@ -55,13 +50,13 @@ function updatedFiles(containerEl: HTMLElement, results: UploadAdfFileResult[], 
 export class CompletedModal extends Modal {
 	constructor(
 		app: App,
-		private readonly props: UploadResultsProps,
+		private readonly results: UploadResults,
 	) {
 		super(app);
 	}
 
 	override onOpen() {
-		const { errorMessage, failedFiles, filesUploadResult } = this.props.uploadResults;
+		const { errorMessage, failedFiles, filesUploadResult } = this.results;
 		this.setTitle(errorMessage ? "Publish failed" : "Publish finished");
 		const root = this.contentEl.createDiv({ cls: "confluence-results" });
 

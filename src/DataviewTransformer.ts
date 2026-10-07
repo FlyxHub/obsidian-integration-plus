@@ -1,5 +1,5 @@
 import type { App } from "obsidian";
-import { Duration, Effect } from "effect";
+import { Effect } from "effect";
 import {
 	transformMarkdownCodeBlocks,
 	type MarkdownSourceTransformer,
@@ -71,10 +71,15 @@ export function createDataviewTransformer(
 			yield* Effect.sleep("50 millis");
 		}
 	}).pipe(
-		withTimeout(
-			"15 seconds",
-			"Dataview indexing did not finish within 15 seconds. Wait for indexing, then publish again.",
-		),
+		Effect.timeoutOrElse({
+			duration: "15 seconds",
+			orElse: () =>
+				Effect.fail(
+					new Error(
+						"Dataview indexing did not finish within 15 seconds. Wait for indexing, then publish again.",
+					),
+				),
+		}),
 	);
 
 	return {
@@ -98,7 +103,12 @@ export function createDataviewTransformer(
 					const result = yield* Effect.tryPromise({
 						try: () => api.queryMarkdown(block.content, originFile, { allowHtml: false }),
 						catch: toError,
-					}).pipe(withTimeout("30 seconds", "Dataview query exceeded 30 seconds."));
+					}).pipe(
+						Effect.timeoutOrElse({
+							duration: "30 seconds",
+							orElse: () => Effect.fail(new Error("Dataview query exceeded 30 seconds.")),
+						}),
+					);
 					if (!result.successful) return yield* Effect.fail(new Error(result.error));
 					return result.value;
 				}).pipe(
@@ -110,15 +120,4 @@ export function createDataviewTransformer(
 			);
 		},
 	};
-}
-
-/** Fail with `message` when the effect takes longer than `duration`; keep other errors. */
-function withTimeout(duration: Duration.Input, message: string) {
-	return <A, E>(effect: Effect.Effect<A, E>) =>
-		effect.pipe(
-			Effect.timeout(duration),
-			Effect.mapError((error) =>
-				error instanceof Error && error.name !== "TimeoutError" ? error : new Error(message),
-			),
-		);
 }
