@@ -2,6 +2,12 @@
 
 All notable changes to Confluence Integration Plus are listed here. For the history of the plugin this one was forked from, see the [markdown-confluence changelog](https://github.com/markdown-confluence/markdown-confluence/blob/main/CHANGELOG.md).
 
+## 1.2.6 (unreleased)
+
+### Changes
+
+- The plugin no longer bundles Node's file system module, which the bundled Confluence library includes only for its command-line tool. Obsidian's plugin review no longer reports direct file system access.
+
 ## 1.2.5 (2026-10-07)
 
 ### Changes
