@@ -36,6 +36,22 @@ test("ignores line breaks at the end of a paragraph", () => {
 	expect(adfToMergeMarkdown(doc(block), BASE_URL)).toBe("Explain.\n");
 });
 
+test("ignores spaces next to a line break, which Markdown drops", () => {
+	const block = {
+		type: "paragraph",
+		content: [
+			text("Confirm with HR. "),
+			{ type: "hardBreak" },
+			text(" Email them at "),
+			{ type: "text", text: "8:00 AM", marks: [{ type: "strong" }] },
+			text("."),
+		],
+	};
+	expect(adfToMergeMarkdown(doc(block), BASE_URL)).toBe(
+		"Confirm with HR. \n Email them at **8:00 AM**.\n",
+	);
+});
+
 test("separates blocks with blank lines so tables do not absorb paragraphs", () => {
 	const cell = (type: string, value: string) => ({
 		type,
