@@ -2,6 +2,12 @@
 
 All notable changes to Confluence Integration Plus are listed here. For the history of the plugin this one was forked from, see the [markdown-confluence changelog](https://github.com/markdown-confluence/markdown-confluence/blob/main/CHANGELOG.md).
 
+## 1.2.8 (unreleased)
+
+### Fixes
+
+- Pulling a Confluence paragraph with a line break after a space no longer turns it into an `adf` code block. Notes that a pull already filled with such blocks get readable text on the next pull.
+
 ## 1.2.7 (2026-10-07)
 
 ### Fixes

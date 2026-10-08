@@ -56,8 +56,9 @@ function joinBlocks(content: unknown[], confluenceBaseUrl: string, media: MediaR
  * 4: images as embeds of downloaded files; empty paragraphs left out.
  * 5: rendered Mermaid diagrams as their source blocks.
  * 6: line breaks at the end of a paragraph ignored.
+ * 7: spaces next to a line break ignored, so such paragraphs are readable Markdown.
  */
-export const MERGE_FORMAT = 6;
+export const MERGE_FORMAT = 7;
 
 /** Confluence panel types and the Obsidian callout type that publishes back to each. */
 const PANEL_CALLOUTS: Record<string, string> = {
@@ -187,12 +188,28 @@ function stripPresentation<T>(value: T): T {
 		result[key] = stripPresentation(child);
 	}
 	const content = result["content"];
-	if (result["type"] === "paragraph" && Array.isArray(content)) {
-		let end = content.length;
-		while (end > 0 && (content[end - 1] as { type?: unknown })?.type === "hardBreak") end--;
-		result["content"] = content.slice(0, end);
-	}
+	if (result["type"] === "paragraph" && Array.isArray(content))
+		result["content"] = trimLineBreaks(content);
 	return sortKeys(result) as T;
+}
+
+/**
+ * Drop line breaks at the end of a paragraph, and spaces next to a line break: neither shows,
+ * and Markdown can't keep them.
+ */
+function trimLineBreaks(content: unknown[]): unknown[] {
+	const isBreak = (node: unknown) => (node as { type?: unknown })?.type === "hardBreak";
+	let end = content.length;
+	while (end > 0 && isBreak(content[end - 1])) end--;
+	return content.slice(0, end).flatMap((node, index, nodes) => {
+		const { type, text } = node as { type?: unknown; text?: unknown };
+		if (type !== "text" || typeof text !== "string") return [node];
+		let trimmed = text;
+		if (isBreak(nodes[index + 1])) trimmed = trimmed.replace(/[ \t]+$/, "");
+		if (isBreak(nodes[index - 1])) trimmed = trimmed.replace(/^[ \t]+/, "");
+		if (trimmed === text) return [node];
+		return trimmed ? [{ ...(node as object), text: trimmed }] : [];
+	});
 }
 
 function sortKeys(value: Record<string, unknown>): Record<string, unknown> {
