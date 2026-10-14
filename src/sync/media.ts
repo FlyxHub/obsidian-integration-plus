@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { getMermaidFileName, parseMarkdownToADF } from "@markdown-confluence/lib";
 import { errorMessage } from "../errors";
 import { baseName, joinPath } from "../paths";
@@ -10,6 +11,8 @@ export interface RemoteAttachment {
 	title: string;
 	/** The media file ID that page content uses to refer to this attachment. */
 	fileId: string;
+	/** The MD5 of the file's content, which the publisher stores as the attachment comment. */
+	hash?: string | undefined;
 }
 
 export interface MediaRemote {
@@ -21,6 +24,9 @@ export interface MediaVault {
 	/** Every file in the vault, to choose embed text like Obsidian does. */
 	filePaths(): string[];
 	exists(path: string): boolean;
+	/** True when a file or folder has this path, ignoring case where the file system does. */
+	pathInUse(path: string): Promise<boolean>;
+	readBinary(path: string): Promise<Uint8Array>;
 	/** Write a binary file, creating missing folders. */
 	writeBinary(path: string, data: Uint8Array): Promise<void>;
 }
@@ -30,6 +36,19 @@ export type MediaResolver = (fileId: string) => string | undefined;
 
 /** The publisher uploads a local file as `<32-hex hash>-<file name>`. */
 const PUBLISHED_ATTACHMENT = /^[0-9a-f]{32}-(.+)$/;
+
+/**
+ * File types Obsidian opens as notes, so an embed would show their content as part of the
+ * note. Attachments come from whoever can edit the page, so these are never made local.
+ */
+const NOTE_EXTENSIONS = new Set([".md", ".markdown", ".canvas", ".base"]);
+
+/** True for files without an extension, which links can't tell from notes, and notes. */
+function opensAsNote(path: string): boolean {
+	const name = baseName(path);
+	const dot = name.lastIndexOf(".");
+	return dot <= 0 || NOTE_EXTENSIONS.has(name.slice(dot).toLowerCase());
+}
 
 /**
  * Keeps page attachments available as vault files, so pulled notes can embed images as
@@ -61,7 +80,9 @@ export class MediaSync {
 			const diagram = this.diagrams.get(fileId);
 			if (diagram) return diagram;
 			const path = map[fileId];
-			return path && this.vault.exists(path) ? `![[${linkText(path)}]]` : undefined;
+			return path && !opensAsNote(path) && this.vault.exists(path)
+				? `![[${linkText(path)}]]`
+				: undefined;
 		};
 	}
 
@@ -96,16 +117,21 @@ export class MediaSync {
 					continue;
 				}
 				if (isLocal) continue;
-				const published = PUBLISHED_ATTACHMENT.exec(attachment.title)?.[1];
-				const localCopy = published && this.findFileNamed(published);
+				const localCopy = await this.publishedCopy(attachment);
 				if (localCopy) {
 					map[fileId] = localCopy;
 					changed = true;
 					continue;
 				}
 				if (!options.download) continue;
+				if (opensAsNote(attachment.title)) {
+					errors.push(
+						`${attachment.title} wasn't downloaded, because Obsidian could open it as a note.`,
+					);
+					continue;
+				}
 				const data = await this.remote.downloadAttachment(pageId, attachment.id);
-				const path = this.availablePath(attachment.title, attachment.id);
+				const path = await this.availablePath(attachment.title, attachment.id);
 				await this.vault.writeBinary(path, data);
 				this.files = undefined;
 				map[fileId] = path;
@@ -129,6 +155,21 @@ export class MediaSync {
 		return this.attachments.get(pageId)!;
 	}
 
+	/**
+	 * The vault file the publisher uploaded as this attachment. The name only says which file
+	 * to check: anyone who can edit the page can upload an attachment with a matching name, so
+	 * the file's content must also match the hash the publisher recorded.
+	 */
+	private async publishedCopy(attachment: RemoteAttachment): Promise<string | undefined> {
+		const name = PUBLISHED_ATTACHMENT.exec(attachment.title)?.[1];
+		const path = name && this.findFileNamed(name);
+		if (!path || opensAsNote(path) || !attachment.hash) return undefined;
+		const hash = createHash("md5")
+			.update(await this.vault.readBinary(path))
+			.digest("hex");
+		return hash === attachment.hash.toLowerCase() ? path : undefined;
+	}
+
 	private findFileNamed(name: string): string | undefined {
 		const matches = this.fileIndex().byName.get(name);
 		return matches?.length === 1 ? matches[0] : undefined;
@@ -148,10 +189,10 @@ export class MediaSync {
 	}
 
 	/** A safe, unused path in the image folder, keeping the attachment's file name. */
-	private availablePath(title: string, attachmentId: string): string {
+	private async availablePath(title: string, attachmentId: string): Promise<string> {
 		const { name, extension } = safeFileName(title, attachmentId);
 		let path = joinPath(this.folder, `${name}${extension}`);
-		for (let copy = 1; this.vault.exists(path); copy++)
+		for (let copy = 1; await this.vault.pathInUse(path); copy++)
 			path = joinPath(this.folder, `${name} ${copy}${extension}`);
 		return path;
 	}

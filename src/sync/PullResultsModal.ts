@@ -18,7 +18,7 @@ export class PullResultsModal extends Modal {
 			return;
 		}
 		const report = this.report;
-		this.setTitle("Pull finished");
+		this.setTitle(report.cancelled ? "Pull cancelled" : "Pull finished");
 		contentEl.createEl("p", { text: summarizePull(report) });
 
 		if (report.conflicted.length > 0) {
@@ -56,7 +56,7 @@ export function summarizePull(report: PullReport): string {
 		`${report.unchanged} unchanged`,
 	];
 	if (report.skipped.length > 0) parts.push(`${report.skipped.length} skipped`);
-	return `Pull finished: ${parts.join(", ")}.`;
+	return `${report.cancelled ? "Pull cancelled" : "Pull finished"}: ${parts.join(", ")}.`;
 }
 
 function section(containerEl: HTMLElement, heading: string, items: string[]) {

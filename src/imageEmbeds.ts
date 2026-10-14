@@ -9,6 +9,7 @@ const IMAGE_EXTENSION = /\.(png|jpe?g|gif|webp|bmp)$/i;
 const WIKI_EMBED = /!\[\[([^\]|#\n]+?)((?:\|[^\]\n]*)?)\]\]/g;
 const MARKDOWN_EMBED = /!\[([^\]\n]*)\]\((<[^>\n]+>|[^)\s]+)((?:\s+"[^"\n]*")?)\)/g;
 const SIZE = /^(\d+)(?:x(\d+))?$/;
+const TABLE_ROW = /^\s*(?:>\s?)*\|/;
 
 /**
  * Give each local image embed an explicit width and height before publishing, so Confluence
@@ -18,7 +19,8 @@ const SIZE = /^(\d+)(?:x(\d+))?$/;
  * whole page. Images wider than `maxWidth` (0 for no limit) are scaled down to it. A width
  * set in the note, as in `![[image.png|400]]`, gets the height that keeps the image's aspect
  * ratio; the publisher would otherwise keep the full height and stretch the image. Sizes set
- * as `WIDTHxHEIGHT`, images that can't be read, and code are left alone.
+ * as `WIDTHxHEIGHT`, images that can't be read, code, and table rows are left alone: the
+ * size's `|` would split a table cell, even escaped.
  */
 export async function sizeImageEmbeds(
 	markdown: string,
@@ -42,7 +44,7 @@ export async function sizeImageEmbeds(
 	const inCode = createFenceTracker();
 	const lines: string[] = [];
 	for (const line of markdown.split("\n")) {
-		if (inCode(line) || !line.includes("![")) {
+		if (inCode(line) || !line.includes("![") || TABLE_ROW.test(line)) {
 			lines.push(line);
 			continue;
 		}

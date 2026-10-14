@@ -6,6 +6,7 @@ import {
 } from "@markdown-confluence/lib";
 import { desktopFetch } from "./desktopFetch";
 import { oauthCallbackUrl, receiveOAuthCode } from "./OAuthCallback";
+import { parseUrl } from "./paths";
 
 export interface OAuthSite {
 	id: string;
@@ -248,7 +249,7 @@ export class AtlassianOAuth {
 			throw new Error("Atlassian returned an invalid device login response.");
 		const verification =
 			response.data["verification_uri_complete"] ?? response.data["verification_uri"];
-		if (typeof verification !== "string" || !URL.canParse(verification))
+		if (typeof verification !== "string" || !parseUrl(verification))
 			throw new Error("Atlassian returned an invalid verification address.");
 		const url = new URL(verification);
 		if (
@@ -329,7 +330,7 @@ function parseSite(entry: unknown): OAuthSite | undefined {
 		typeof id !== "string" ||
 		!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(id) ||
 		typeof url !== "string" ||
-		!URL.canParse(url) ||
+		!parseUrl(url) ||
 		!Array.isArray(scopes) ||
 		!scopes.includes("read:page:confluence")
 	)

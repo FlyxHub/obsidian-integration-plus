@@ -166,8 +166,13 @@ export class ConfluencePerPageForm extends Modal {
 				save.disabled = [...errors.values()].some((list) => list.length > 0);
 			};
 
-			renderInput(valueCell, property, field, values[property].value, (value) => update({ value }));
-			const setInput = row.createEl("td").createEl("input", {
+			const setCell = row.createEl("td");
+			// Changing a value means it should be saved.
+			renderInput(valueCell, property, field, values[property].value, (value) => {
+				setInput.checked = true;
+				update({ value, isSet: true });
+			});
+			const setInput = setCell.createEl("input", {
 				type: "checkbox",
 				attr: { "aria-label": `Write ${field.key} to frontmatter` },
 			});

@@ -26,6 +26,7 @@ function respondWith(...responses: { status: number; location?: string; body?: s
 			destroy: vi.fn(),
 		});
 		const outgoing = Object.assign(new EventEmitter(), {
+			setTimeout: vi.fn(),
 			end: () =>
 				queueMicrotask(() => {
 					callback(incoming);

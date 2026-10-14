@@ -46,3 +46,14 @@ test("notes with Dataview queries always count as changed while Dataview publish
 	expect(hasLiveQueries(text, { ...settings, renderDataview: false })).toBe(false);
 	expect(hasLiveQueries("```js\n```\n", { ...settings, renderDataview: true })).toBe(false);
 });
+
+test("settings added to the key later change it only when they're set", () => {
+	const key = publishSettingsKey(settings);
+	expect(
+		publishSettingsKey({ ...settings, pageHeaderMarkdown: "", ignoredCodeBlockLanguages: [] }),
+	).toBe(key);
+	expect(
+		publishSettingsKey({ ...settings, confluenceSiteUrl: "https://site.atlassian.net" }),
+	).not.toBe(key);
+	expect(publishSettingsKey({ ...settings, pageFooterMarkdown: "Footer" })).not.toBe(key);
+});

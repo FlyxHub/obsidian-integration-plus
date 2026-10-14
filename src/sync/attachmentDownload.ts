@@ -4,6 +4,8 @@ import { isRedirect, nodeRequest } from "../nodeRequest";
 /** Largest attachment pull will download. */
 const MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024;
 const MAX_MEDIA_REDIRECTS = 3;
+/** Media requests carry no abort signal, so a stalled one must end on its own. */
+const MEDIA_IDLE_TIMEOUT_MS = 30000;
 const DOWNLOAD_PATH = /\/wiki\/rest\/api\/content\/\d+\/child\/attachment\/[^/]+\/download$/;
 
 type Captured = { bytes: Uint8Array } | { location: string };
@@ -60,7 +62,10 @@ async function fetchMedia(location: string): Promise<Uint8Array> {
 	let url = location;
 	for (let hop = 0; hop <= MAX_MEDIA_REDIRECTS; hop++) {
 		assertAtlassianMediaUrl(url);
-		const response = await nodeRequest(url, { maxBytes: MAX_ATTACHMENT_BYTES });
+		const response = await nodeRequest(url, {
+			maxBytes: MAX_ATTACHMENT_BYTES,
+			idleTimeoutMs: MEDIA_IDLE_TIMEOUT_MS,
+		});
 		if (isRedirect(response.status) && response.location) {
 			url = new URL(response.location, url).href;
 			continue;

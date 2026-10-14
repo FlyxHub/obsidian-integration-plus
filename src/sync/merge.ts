@@ -66,10 +66,20 @@ export function mergeTwoWay(local: string, remote: string): MergeOutcome {
 	return { text: joinLines(output), conflicts };
 }
 
-/** True when the text still contains merge conflict markers. */
+/**
+ * True when the text still contains a merge conflict marker. One left over from a partly
+ * resolved conflict counts too. `=======` alone doesn't, because it's also a heading underline.
+ */
 export function hasConflictMarkers(text: string): boolean {
-	const markerLines = text.replace(/\r\n?/g, "\n").split("\n");
-	return markerLines.some((line) => line === START) && markerLines.some((line) => line === END);
+	return text
+		.replace(/\r\n?/g, "\n")
+		.split("\n")
+		.some((line) => line === START || line === END);
+}
+
+/** True when two texts have the same lines, ignoring line endings and trailing newlines. */
+export function sameLines(left: string, right: string): boolean {
+	return joinLines(lines(left)) === joinLines(lines(right));
 }
 
 function lines(text: string): string[] {

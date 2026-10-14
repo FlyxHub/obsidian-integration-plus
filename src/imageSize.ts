@@ -33,11 +33,12 @@ function webpSize(
 	const chunk = ascii(12, 4);
 	if (chunk === "VP8 ")
 		return valid(view.getUint16(26, true) & 0x3fff, view.getUint16(28, true) & 0x3fff);
-	if (chunk === "VP8L") {
+	// Missing bytes would read as 0, so a cut-off header must not be read.
+	if (chunk === "VP8L" && bytes.length >= 25) {
 		const [b0, b1, b2, b3] = [bytes[21]!, bytes[22]!, bytes[23]!, bytes[24]!];
 		return valid(1 + (((b1 & 0x3f) << 8) | b0), 1 + (((b3 & 0xf) << 10) | (b2 << 2) | (b1 >> 6)));
 	}
-	if (chunk === "VP8X") {
+	if (chunk === "VP8X" && bytes.length >= 30) {
 		const uint24 = (offset: number) =>
 			bytes[offset]! | (bytes[offset + 1]! << 8) | (bytes[offset + 2]! << 16);
 		return valid(1 + uint24(24), 1 + uint24(27));
@@ -59,7 +60,7 @@ function jpegSize(
 		const marker = bytes[offset + 1]!;
 		const length = view.getUint16(offset + 2);
 		if (marker === 0xe1 && ascii(offset + 4, 6) === "Exif\0\0")
-			rotated = ROTATED.has(exifOrientation(view, offset + 10) ?? 1);
+			rotated = ROTATED.has(exifOrientation(view, offset + 10, offset + 2 + length) ?? 1);
 		// Start-of-frame markers, except DHT (C4), JPG (C8) and DAC (CC).
 		if (marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker)) {
 			const height = view.getUint16(offset + 5);
@@ -71,14 +72,22 @@ function jpegSize(
 	return undefined;
 }
 
-/** The orientation tag (0x0112) in the first image directory of a TIFF-format EXIF block. */
-function exifOrientation(view: DataView, tiff: number): number | undefined {
-	const little = view.getUint16(tiff) === 0x4949;
-	const directory = tiff + view.getUint32(tiff + 4, little);
-	const entries = view.getUint16(directory, little);
-	for (let index = 0; index < entries; index++) {
-		const entry = directory + 2 + index * 12;
-		if (view.getUint16(entry, little) === 0x0112) return view.getUint16(entry + 8, little);
+/**
+ * The orientation tag (0x0112) in the first image directory of a TIFF-format EXIF block that
+ * ends at `end`. A damaged block counts as no orientation, so the image keeps its size.
+ */
+function exifOrientation(view: DataView, tiff: number, end: number): number | undefined {
+	try {
+		const little = view.getUint16(tiff) === 0x4949;
+		const directory = tiff + view.getUint32(tiff + 4, little);
+		const entries = view.getUint16(directory, little);
+		for (let index = 0; index < entries; index++) {
+			const entry = directory + 2 + index * 12;
+			if (entry + 12 > end) return undefined;
+			if (view.getUint16(entry, little) === 0x0112) return view.getUint16(entry + 8, little);
+		}
+	} catch {
+		// The directory offset points past the end of the file.
 	}
 	return undefined;
 }

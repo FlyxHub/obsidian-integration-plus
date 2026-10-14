@@ -42,3 +42,9 @@ test("sizes every embed on a line and keeps the text around them", async () => {
 		"Before ![[big.png|700x350]] and ![[small.png|150x100]] after.",
 	);
 });
+
+test("leaves embeds in table rows alone, because a size's | would split the cell", async () => {
+	const row = "| ![[big.png]] | x |";
+	expect(await size(row)).toBe(row);
+	expect(await size("> | ![big](big.png) |")).toBe("> | ![big](big.png) |");
+});

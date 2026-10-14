@@ -1,5 +1,6 @@
 import { Modal, App } from "obsidian";
 import type { UploadAdfFileResult } from "@markdown-confluence/lib";
+import { parseUrl } from "./paths";
 
 interface FailedFile {
 	fileName: string;
@@ -14,7 +15,7 @@ export interface UploadResults {
 
 /** Page URLs come from the Confluence API; only link to web pages. */
 function safePageUrl(url: string | undefined): string | undefined {
-	return url && URL.parse(url)?.protocol === "https:" ? url : undefined;
+	return url && parseUrl(url)?.protocol === "https:" ? url : undefined;
 }
 
 /** The parts of a page the publisher reports on, with their labels in the results. */

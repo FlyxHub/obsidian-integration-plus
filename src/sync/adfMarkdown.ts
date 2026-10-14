@@ -35,7 +35,7 @@ export function adfToMergeMarkdown(
 	confluenceBaseUrl: string,
 	media: MediaResolver = () => undefined,
 ): string {
-	const document = readAdfDocument(input) as { content?: unknown[] };
+	const document = neutralizeExecutableAdf(readAdfDocument(input)) as { content?: unknown[] };
 	return joinBlocks(document.content ?? [], confluenceBaseUrl, media) + "\n";
 }
 
@@ -57,8 +57,13 @@ function joinBlocks(content: unknown[], confluenceBaseUrl: string, media: MediaR
  * 5: rendered Mermaid diagrams as their source blocks.
  * 6: line breaks at the end of a paragraph ignored.
  * 7: spaces next to a line break ignored, so such paragraphs are readable Markdown.
+ * 8: executable code made inert in the ADF, so it's caught inside quotes, lists and panels,
+ *    and `dataview` queries too; code inside other code blocks is left as it is.
  */
-export const MERGE_FORMAT = 7;
+export const MERGE_FORMAT = 8;
+
+/** The first format that neutralizes code in the ADF; see `neutralizeLegacyBase`. */
+const ADF_NEUTRALIZED_FORMAT = 8;
 
 /** Confluence panel types and the Obsidian callout type that publishes back to each. */
 const PANEL_CALLOUTS: Record<string, string> = {
@@ -79,13 +84,9 @@ function blockToMarkdown(block: AdfNode, confluenceBaseUrl: string, media: Media
 		if (callout && publishesAs(callout, block, confluenceBaseUrl)) return callout;
 	}
 	const readable = convertADFToMarkdown(asDocument(block), { lossless: false }).trim();
-	if (readable && !readable.startsWith("```adf")) {
-		if (publishesAs(readable, block, confluenceBaseUrl))
-			return neutralizeExecutableMarkdown(readable);
-	}
-	return neutralizeExecutableMarkdown(
-		convertADFToMarkdown(asDocument(stripPresentation(block)), { lossless: true }).trim(),
-	);
+	if (readable && !readable.startsWith("```adf") && publishesAs(readable, block, confluenceBaseUrl))
+		return readable;
+	return convertADFToMarkdown(asDocument(stripPresentation(block)), { lossless: true }).trim();
 }
 
 /**
@@ -136,30 +137,64 @@ function publishesAs(markdown: string, block: AdfNode, confluenceBaseUrl: string
 }
 
 /**
- * Code block languages that Obsidian plugins run as JavaScript when a note is viewed.
+ * Code block languages that Obsidian plugins run as JavaScript when a note is viewed, and
+ * Dataview queries, which read the whole vault and are published as their results.
  * Anyone who can edit the Confluence page controls pulled content, so it must not arrive
  * as code that runs in the vault.
  */
 const EXECUTABLE_LANGUAGES = new Set([
+	"dataview",
 	"dataviewjs",
 	"js-engine",
 	"js-engine-debug",
 	"meta-bind-js-view",
 ]);
 
+/** Dataview inline JavaScript: inline code starting with `$=`. */
+const INLINE_JS = /^(\s*)\$=/;
+
 /**
- * Make pulled content inert: executable code blocks become plain `text` blocks, and Dataview
- * inline JavaScript (`` `$= ...` ``) gets a space so it no longer runs. Notes you wrote keep
- * their own blocks, because the merge keeps local text that Confluence didn't change.
+ * Make pulled content inert, wherever it is in the page: executable code blocks become plain
+ * `text` blocks, and Dataview inline JavaScript (`` `$= ...` ``) gets a space so it no longer
+ * runs. Notes you wrote keep their own blocks, because the merge keeps local text that
+ * Confluence didn't change.
  */
-export function neutralizeExecutableMarkdown(markdown: string): string {
+function neutralizeExecutableAdf(node: unknown): unknown {
+	if (Array.isArray(node)) return node.map(neutralizeExecutableAdf);
+	if (!isNode(node)) return node;
+	const result: AdfNode & { text?: unknown; marks?: unknown } = { ...node };
+	const language = node.attrs?.["language"];
+	if (
+		node.type === "codeBlock" &&
+		typeof language === "string" &&
+		EXECUTABLE_LANGUAGES.has(language.toLowerCase())
+	)
+		result.attrs = { ...node.attrs, language: "text" };
+	if (
+		node.type === "text" &&
+		typeof result.text === "string" &&
+		Array.isArray(result.marks) &&
+		result.marks.some((mark) => (mark as { type?: unknown })?.type === "code")
+	)
+		result.text = result.text.replace(INLINE_JS, "$1$ =");
+	if (node.content) result.content = node.content.map(neutralizeExecutableAdf);
+	return result;
+}
+
+/**
+ * Snapshots older than `ADF_NEUTRALIZED_FORMAT` made code inert in the Markdown, and missed
+ * it inside quotes, lists and callouts. Applying the same rule to such a base before merging
+ * keeps a pull from rewriting code blocks you wrote there as `text`.
+ */
+export function neutralizeLegacyBase(markdown: string, format: number): string {
+	if (format >= ADF_NEUTRALIZED_FORMAT) return markdown;
 	return markdown
 		.replace(
-			/^(\s*)(`{3,}|~{3,})[ \t]*([\w-]+)/gm,
-			(match, indent: string, fence: string, language: string) =>
-				EXECUTABLE_LANGUAGES.has(language.toLowerCase()) ? `${indent}${fence}text` : match,
+			/^((?:[ \t]*(?:>|[-*+](?=[ \t])|\d{1,9}[.)](?=[ \t])))*[ \t]*)(`{3,}|~{3,})[ \t]*([\w-]+)/gm,
+			(match, prefix: string, fence: string, language: string) =>
+				EXECUTABLE_LANGUAGES.has(language.toLowerCase()) ? `${prefix}${fence}text` : match,
 		)
-		.replace(/`\$=/g, "`$ =");
+		.replace(/`(\s*)\$=/g, "`$1$ =");
 }
 
 /** True when two ADF fragments differ only in editor-only presentation attributes. */
