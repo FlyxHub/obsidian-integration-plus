@@ -20,7 +20,12 @@ const PRESENTATION_ATTRS: Record<string, (value: unknown) => boolean> = {
 	width: () => true,
 	displayMode: (value) => value === "default",
 	__autoSize: () => true,
+	// Smart link details Confluence's editor caches, such as the linked page's title.
+	__confluenceMetadata: () => true,
 };
+
+/** Marks Markdown writes around text, which can't start or end inside them with a space. */
+const EMPHASIS_MARKS = new Set(["strong", "em", "strike"]);
 
 /**
  * Convert Confluence ADF to Markdown that is stable enough to diff and merge.
@@ -35,7 +40,9 @@ export function adfToMergeMarkdown(
 	confluenceBaseUrl: string,
 	media: MediaResolver = () => undefined,
 ): string {
-	const document = neutralizeExecutableAdf(readAdfDocument(input)) as { content?: unknown[] };
+	const document = tidyText(neutralizeExecutableAdf(readAdfDocument(input))) as {
+		content?: unknown[];
+	};
 	return joinBlocks(document.content ?? [], confluenceBaseUrl, media) + "\n";
 }
 
@@ -59,8 +66,11 @@ function joinBlocks(content: unknown[], confluenceBaseUrl: string, media: MediaR
  * 7: spaces next to a line break ignored, so such paragraphs are readable Markdown.
  * 8: executable code made inert in the ADF, so it's caught inside quotes, lists and panels,
  *    and `dataview` queries too; code inside other code blocks is left as it is.
+ * 9: blocks readable that Markdown can represent once compared like the publisher writes
+ *    them: smart links to pages in personal spaces (`/spaces/~...`), bold or italic text
+ *    with a space at an end, marks in another order, and line breaks at a paragraph's start.
  */
-export const MERGE_FORMAT = 8;
+export const MERGE_FORMAT = 9;
 
 /** The first format that neutralizes code in the ADF; see `neutralizeLegacyBase`. */
 const ADF_NEUTRALIZED_FORMAT = 8;
@@ -76,7 +86,7 @@ const PANEL_CALLOUTS: Record<string, string> = {
 
 function blockToMarkdown(block: AdfNode, confluenceBaseUrl: string, media: MediaResolver): string {
 	// Confluence adds empty paragraphs, often at the end of a page; they carry no content.
-	if (block.type === "paragraph" && (block.content ?? []).length === 0) return "";
+	if (block.type === "paragraph" && trimLineBreaks(block.content ?? []).length === 0) return "";
 	const embeds = mediaEmbeds(block, media);
 	if (embeds) return embeds;
 	if (block.type === "panel") {
@@ -203,8 +213,9 @@ export function sameContent(left: unknown, right: unknown): boolean {
 }
 
 /**
- * Remove editor-only attributes, empty `attrs`/`marks`, and line breaks at the end of a
- * paragraph (which Markdown can't represent and don't show), so fragments compare by content.
+ * Remove editor-only attributes, empty `attrs`/`marks`/`content`, and line breaks at either
+ * end of a paragraph (which Markdown can't represent and don't show), so fragments compare by
+ * content. Marks compare in any order, and smart links to pages by their page, as published.
  */
 function stripPresentation<T>(value: T): T {
 	if (Array.isArray(value)) return value.map(stripPresentation) as T;
@@ -219,32 +230,117 @@ function stripPresentation<T>(value: T): T {
 			if (Object.keys(attrs).length > 0) result[key] = sortKeys(attrs);
 			continue;
 		}
-		if (key === "marks" && Array.isArray(child) && child.length === 0) continue;
+		if ((key === "marks" || key === "content") && Array.isArray(child) && child.length === 0)
+			continue;
 		result[key] = stripPresentation(child);
 	}
-	const content = result["content"];
-	if (result["type"] === "paragraph" && Array.isArray(content))
-		result["content"] = trimLineBreaks(content);
+	const { content, marks, attrs } = result as {
+		content?: unknown;
+		marks?: unknown;
+		attrs?: unknown;
+	};
+	if (result["type"] === "paragraph" && Array.isArray(content)) {
+		const trimmed = trimLineBreaks(content);
+		if (trimmed.length > 0) result["content"] = trimmed;
+		else delete result["content"];
+	}
+	if (Array.isArray(marks)) result["marks"] = [...(marks as unknown[])].sort(byMarkType);
+	const url = (attrs as { url?: unknown } | undefined)?.url;
+	if (result["type"] === "inlineCard" && typeof url === "string")
+		result["attrs"] = { ...(attrs as object), url: publishedPageUrl(url) };
 	return sortKeys(result) as T;
 }
 
+function byMarkType(left: unknown, right: unknown): number {
+	return String((left as { type?: unknown }).type).localeCompare(
+		String((right as { type?: unknown }).type),
+	);
+}
+
 /**
- * Drop line breaks at the end of a paragraph, and spaces next to a line break: neither shows,
- * and Markdown can't keep them.
+ * A smart link's address as the publisher writes it: a link to a page loses the `~` of a
+ * personal space and anything after the page ID, which Confluence resolves to the same page.
+ */
+function publishedPageUrl(url: string): string {
+	let parsed: URL;
+	try {
+		parsed = new URL(url);
+	} catch {
+		return url;
+	}
+	const page = /\/wiki\/spaces\/~?(\w+)\/pages\/(\d+)/.exec(parsed.pathname);
+	if (!page) return url;
+	parsed.pathname = `/wiki/spaces/${page[1]}/pages/${page[2]}`;
+	return parsed.href;
+}
+
+/**
+ * Drop line breaks at the start and end of a paragraph, and spaces next to a line break:
+ * none of them show, and Markdown can't keep them.
  */
 function trimLineBreaks(content: unknown[]): unknown[] {
 	const isBreak = (node: unknown) => (node as { type?: unknown })?.type === "hardBreak";
+	let start = 0;
 	let end = content.length;
-	while (end > 0 && isBreak(content[end - 1])) end--;
-	return content.slice(0, end).flatMap((node, index, nodes) => {
+	while (start < end && isBreak(content[start])) start++;
+	while (end > start && isBreak(content[end - 1])) end--;
+	return content.slice(start, end).flatMap((node, offset) => {
+		const index = start + offset;
 		const { type, text } = node as { type?: unknown; text?: unknown };
 		if (type !== "text" || typeof text !== "string") return [node];
 		let trimmed = text;
-		if (isBreak(nodes[index + 1])) trimmed = trimmed.replace(/[ \t]+$/, "");
-		if (isBreak(nodes[index - 1])) trimmed = trimmed.replace(/^[ \t]+/, "");
+		if (isBreak(content[index + 1])) trimmed = trimmed.replace(/[ \t]+$/, "");
+		if (isBreak(content[index - 1])) trimmed = trimmed.replace(/^[ \t]+/, "");
 		if (trimmed === text) return [node];
 		return trimmed ? [{ ...(node as object), text: trimmed }] : [];
 	});
+}
+
+type TextNode = { type: "text"; text: string; marks?: { type?: unknown }[] };
+
+/**
+ * Shape inline text the way Markdown can write it, before converting: spaces at the ends of
+ * bold, italic or struck-through text move outside it (`**a **` isn't bold in Markdown), and
+ * neighboring text with the same marks joins, as the publisher's parser joins it.
+ */
+function tidyText(node: unknown): unknown {
+	if (Array.isArray(node)) return node.map(tidyText);
+	if (!isNode(node) || !node.content) return node;
+	const content: unknown[] = [];
+	for (const child of node.content.map(tidyText).flatMap(splitEdgeSpaces)) {
+		const previous = content.at(-1);
+		if (isText(child) && isText(previous) && sameMarks(child, previous))
+			content[content.length - 1] = { ...previous, text: previous.text + child.text };
+		else content.push(child);
+	}
+	return { ...node, content };
+}
+
+function splitEdgeSpaces(node: unknown): unknown[] {
+	if (!isText(node) || !node.marks?.some((mark) => EMPHASIS_MARKS.has(String(mark.type))))
+		return [node];
+	if (node.marks.some((mark) => mark.type === "code")) return [node];
+	const [, before = "", inner = "", after = ""] = /^(\s*)([\s\S]*?)(\s*)$/.exec(node.text) ?? [];
+	if (!inner || (!before && !after)) return [node];
+	const outer = node.marks.filter((mark) => !EMPHASIS_MARKS.has(String(mark.type)));
+	const space = (text: string): TextNode =>
+		outer.length > 0 ? { type: "text", text, marks: outer } : { type: "text", text };
+	return [
+		...(before ? [space(before)] : []),
+		{ ...node, text: inner },
+		...(after ? [space(after)] : []),
+	];
+}
+
+function isText(node: unknown): node is TextNode {
+	const { type, text } = (node ?? {}) as { type?: unknown; text?: unknown };
+	return type === "text" && typeof text === "string";
+}
+
+function sameMarks(left: TextNode, right: TextNode): boolean {
+	const key = (node: TextNode) =>
+		JSON.stringify(stripPresentation([...(node.marks ?? [])].sort(byMarkType)));
+	return key(left) === key(right);
 }
 
 function sortKeys(value: Record<string, unknown>): Record<string, unknown> {

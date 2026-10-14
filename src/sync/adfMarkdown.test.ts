@@ -146,6 +146,51 @@ test("neutralizes executable fences in snapshots from before the ADF was neutral
 	expect(neutralizeLegacyBase(old, MERGE_FORMAT)).toBe(old);
 });
 
+test("keeps editor-saved content readable that publishes back the same way", () => {
+	const page = `${BASE_URL}/wiki/spaces/~712020c/pages/4739956737`;
+	const card = {
+		type: "inlineCard",
+		attrs: {
+			url: page,
+			__confluenceMetadata: { contentTitle: "Tickets", linkType: "page", versionAtSave: "11" },
+		},
+	};
+	const item = (...content: unknown[]) => ({
+		type: "listItem",
+		content: [{ type: "paragraph", content }],
+	});
+	const marked = (value: string, ...types: string[]) => ({
+		type: "text",
+		text: value,
+		marks: types.map((type) =>
+			type === "link" ? { type, attrs: { href: "https://example.com/a" } } : { type },
+		),
+	});
+	const markdown = adfToMergeMarkdown(
+		doc(
+			// A smart link to a page in a personal space, which publishes without the `~`.
+			{ type: "bulletList", content: [item(card), item(text("Plain"))] },
+			// Bold text that starts with a space, which Markdown writes outside the bold.
+			{
+				type: "panel",
+				attrs: { panelType: "info" },
+				content: [
+					{ type: "paragraph", content: [text("exist in"), marked(" (N. Virginia)", "strong")] },
+				],
+			},
+			// Marks in another order than the publisher writes them.
+			{ type: "paragraph", content: [text("Open "), marked("Director", "strong", "link")] },
+			// Line breaks alone, or at the start, don't show.
+			{ type: "paragraph", content: [{ type: "hardBreak" }, { type: "hardBreak" }] },
+			{ type: "paragraph", content: [{ type: "hardBreak" }, text("After a break.")] },
+		),
+		BASE_URL,
+	);
+	expect(markdown).not.toContain("```adf");
+	expect(markdown).toContain("**(N. Virginia)**");
+	expect(markdown).toContain("After a break.");
+});
+
 test("pulls Confluence panels as Obsidian callouts", () => {
 	const panel = (panelType: string, ...content: unknown[]) => ({
 		type: "panel",

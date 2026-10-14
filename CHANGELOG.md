@@ -15,6 +15,7 @@ All notable changes to Confluence Integration Plus are listed here. For the hist
 
 ### Fixes
 
+- Pulling keeps more content that was saved in Confluence's editor as readable Markdown instead of `adf` code blocks: smart links to pages in personal spaces, bold or italic text that starts or ends with a space, text with both a link and formatting, and paragraphs that start with a line break. Notes that a pull filled with such blocks get readable text again on the next pull.
 - Publishing no longer overwrites an edit that someone saved in Confluence while the publish was running, and a page that someone saved right after a publish keeps its edit for the next pull.
 - **Publish changes** no longer skips edits that you made while a publish was running, changes in notes and images embedded in embedded notes, or a change of the Confluence site URL, page header, or page footer.
 - Blog posts now get the same check before publishing as pages.
