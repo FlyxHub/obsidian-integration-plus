@@ -21,6 +21,7 @@ All notable changes to Confluence Integration Plus are listed here. For the hist
 - Two notes linked to the same page, such as a copied note, stop the publish instead of overwriting each other.
 - A cancelled or failed retry no longer discards the records of pages that were already published.
 - A cancelled pull shows the notes it already updated.
+- A pull lists the notes that had no sync history and whose pages you edited last, so you can check them for edits that you made in Confluence before publishing over them.
 - A stalled attachment download now times out instead of blocking every later publish and pull.
 - Publishing several pages with Mermaid diagrams no longer leaves Obsidian's own diagrams using the publish theme.
 - Image sizes no longer split table cells, and images with damaged EXIF data keep their size.

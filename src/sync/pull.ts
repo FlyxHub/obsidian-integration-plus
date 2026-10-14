@@ -57,6 +57,11 @@ export interface PullReport {
 	renamed: { path: string; title: string }[];
 	deleted: string[];
 	skipped: { name: string; reason: string }[];
+	/**
+	 * Notes with no snapshot whose page you edited last. Confluence's version was taken as the
+	 * base without changing the note; an edit you made in Confluence isn't in the note.
+	 */
+	noHistory: string[];
 	unchanged: number;
 	/** The pull was cancelled; the lists cover the notes handled before that. */
 	cancelled?: boolean;
@@ -132,6 +137,7 @@ export class PullService {
 			renamed: [],
 			deleted: [],
 			skipped: [],
+			noHistory: [],
 			unchanged: 0,
 		};
 		const linked = this.vault.linkedNotes();
@@ -280,6 +286,7 @@ export class PullService {
 			// holds our own content, so record it as the base without touching the note. The
 			// note may have changed since, so it isn't marked as in sync.
 			await this.recordBase(page, remote, undefined);
+			report.noHistory.push(path);
 			report.unchanged++;
 			return;
 		} else {

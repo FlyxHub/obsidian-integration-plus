@@ -176,6 +176,7 @@ test("pull with no base records our own last publish without changing the note",
 	const report = await new PullService(remote, vault, store, NO_MEDIA).pull(OPTIONS);
 	expect(files["A.md"]).toBe(note);
 	expect(report.unchanged).toBe(1);
+	expect(report.noHistory).toEqual(["A.md"]);
 	expect(bases.get("1")?.version).toBe(5);
 });
 

@@ -241,6 +241,8 @@ To pull, do one of the following:
 
 When the pull finishes, a dialog lists the notes that were updated, imported, or have conflicts. If a note has conflicts, the dialog opens even when **Show results after publishing** is off.
 
+The dialog also opens when a note has no sync history, for example on a new device, and you were the last to edit its page. The plugin takes the page as published from the note and doesn't change the note. If you edited that page in Confluence, copy the edit into the note before you publish it, because publishing replaces the page.
+
 If a page's title changed in Confluence, the plugin sets the note's `connie-title` property to the new title. It doesn't rename the note file.
 
 If a page was deleted in Confluence, the plugin reports it and keeps your note.
