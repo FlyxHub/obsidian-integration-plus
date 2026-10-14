@@ -1,6 +1,7 @@
 import { test, expect } from "@effect/vitest";
 import { createServer } from "node:http";
-import { krokiFetch } from "./KrokiFetch";
+import { krokiFetch, plantumlFetch } from "./KrokiFetch";
+import { nodeRequest } from "./nodeRequest";
 
 test("desktop Kroki transport preserves image bytes, rejects redirects and honors abort", async () => {
 	const bytes = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 255, 128]);
@@ -29,6 +30,38 @@ test("desktop Kroki transport preserves image bytes, rejects redirects and honor
 		const pending = krokiFetch(base + "/slow", { signal: controller.signal });
 		controller.abort();
 		await expect(pending).rejects.toThrow();
+	} finally {
+		server.closeAllConnections();
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+	}
+});
+
+test("PlantUML transport follows redirects and stalled diagram requests end", async () => {
+	const server = createServer((request, response) => {
+		if (request.url === "/old/png/x") {
+			response.writeHead(301, { location: "/plantuml/png/x" });
+			response.end();
+			return;
+		}
+		if (request.url === "/stall") {
+			response.writeHead(200);
+			response.write("partial");
+			return;
+		}
+		response.writeHead(200, { "content-type": "image/png" });
+		response.end("PNG");
+	});
+	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+	try {
+		const address = server.address();
+		if (!address || typeof address === "string") throw new Error("Missing test address");
+		const base = `http://127.0.0.1:${address.port}`;
+		const response = await plantumlFetch(`${base}/old/png/x`);
+		expect(response.ok).toBe(true);
+		expect(await response.text()).toBe("PNG");
+		await expect(
+			nodeRequest(`${base}/stall`, { allowHttp: true, idleTimeoutMs: 50 }),
+		).rejects.toThrow("stopped responding");
 	} finally {
 		server.closeAllConnections();
 		await new Promise<void>((resolve) => server.close(() => resolve()));

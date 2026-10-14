@@ -40,12 +40,22 @@ export function createSyncStateStore(adapter: DataAdapter, directory: string): S
 		if (!PAGE_ID.test(pageId)) throw new Error(`Invalid Confluence page ID: ${pageId}`);
 		return `${directory}/${pageId}.json`;
 	};
-	/** Parsed JSON from a file in the directory, or undefined if it's missing or unreadable. */
+	/**
+	 * Parsed JSON from a file in the directory, or undefined if it's missing. A damaged file
+	 * fails instead: taken as missing, a snapshot would lose the merge base, and the media map
+	 * would be overwritten with only new entries.
+	 */
 	const readJson = async (path: string): Promise<unknown> => {
+		let text: string;
 		try {
-			return JSON.parse(await adapter.read(path)) as unknown;
+			text = await adapter.read(path);
 		} catch {
 			return undefined;
+		}
+		try {
+			return JSON.parse(text) as unknown;
+		} catch {
+			throw new Error(`Sync data in ${path} is damaged. Delete the file, then pull again.`);
 		}
 	};
 	let directoryExists = false;

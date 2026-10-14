@@ -10,6 +10,8 @@ export interface NodeRequestOptions {
 	allowHttp?: boolean;
 	/** Fail when the response body grows past this many bytes. */
 	maxBytes?: number;
+	/** Fail when the connection is idle this long, for requests without their own deadline. */
+	idleTimeoutMs?: number;
 }
 
 export interface NodeResponse {
@@ -69,6 +71,10 @@ export function nodeRequest(url: string, options: NodeRequestOptions = {}): Prom
 				incoming.on("end", () => respond(Buffer.concat(chunks)));
 			},
 		);
+		if (options.idleTimeoutMs !== undefined)
+			outgoing.setTimeout(options.idleTimeoutMs, () =>
+				outgoing.destroy(new Error("The server stopped responding.")),
+			);
 		outgoing.on("error", reject);
 		outgoing.end(options.body);
 	});

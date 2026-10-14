@@ -1,14 +1,14 @@
 import { createServer } from "node:http";
 import { timingSafeEqual } from "node:crypto";
+import { parseUrl } from "./paths";
 
 export function oauthCallbackUrl(value: string): URL {
-	if (!URL.canParse(value)) throw new Error("Enter a valid loopback callback URL.");
-	const url = new URL(value);
+	const url = parseUrl(value);
+	if (!url) throw new Error("Enter a valid loopback callback URL.");
 	if (
 		url.protocol !== "http:" ||
 		url.hostname !== "127.0.0.1" ||
-		!url.port ||
-		Number(url.port) < 1 ||
+		callbackPort(url) < 1 ||
 		url.pathname !== "/callback" ||
 		url.username ||
 		url.password ||
@@ -17,6 +17,11 @@ export function oauthCallbackUrl(value: string): URL {
 	)
 		throw new Error("Use http://127.0.0.1:PORT/callback and register the same URL with Atlassian.");
 	return url;
+}
+
+/** The URL's port. The URL parser leaves out port 80, because it's the default for HTTP. */
+function callbackPort(url: URL): number {
+	return url.port ? Number(url.port) : 80;
 }
 
 /** A temporary IPv4 loopback listener; only a matching, single-use state can finish login. */
@@ -52,9 +57,11 @@ export function receiveOAuthCode(
 					"X-Content-Type-Options": "nosniff",
 					Connection: "close",
 				});
+				// "close" also follows a reply the browser disconnected from before it was sent,
+				// which never finishes; the state is used up by then, so login must still end.
+				if (complete) response.once("close", complete);
 				response.end(
 					`<!doctype html><html lang="en"><meta charset="utf-8"><title>Confluence login</title><body><h1>Confluence Integration Plus</h1><p>${message}</p><p>You can close this tab and return to Obsidian.</p></body></html>`,
-					complete,
 				);
 			};
 			if (
@@ -65,7 +72,7 @@ export function receiveOAuthCode(
 				reply(403, "This request is not allowed.");
 				return;
 			}
-			if (!URL.canParse(request.url ?? "/", base)) {
+			if (!parseUrl(request.url ?? "/", base)) {
 				reply(400, "Invalid request.");
 				return;
 			}
@@ -115,7 +122,7 @@ export function receiveOAuthCode(
 			abort();
 			return;
 		}
-		server.listen(Number(base.port), "127.0.0.1", () => {
+		server.listen(callbackPort(base), "127.0.0.1", () => {
 			if (finished) {
 				server.close();
 				return;

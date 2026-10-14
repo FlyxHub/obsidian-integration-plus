@@ -508,10 +508,15 @@ function isConfluenceAuthType(value: string): value is "basic" | "bearer" | "oau
 	return value === "basic" || value === "bearer" || value === "oauth2";
 }
 
-/** Vault-relative folder path; normalizePath("") would return "/", so keep blanks blank. */
+/**
+ * Vault-relative folder path; normalizePath("") would return "/", so keep blanks blank. The
+ * publisher writes the whole vault as ".", and matches no note against "/".
+ */
 function toVaultFolder(value: string): string {
 	const trimmed = value.trim();
-	return trimmed ? normalizePath(trimmed) : "";
+	if (!trimmed) return "";
+	const folder = normalizePath(trimmed);
+	return folder === "/" ? "." : folder;
 }
 
 function formatRequestHeaders(headers: Record<string, string>): string {

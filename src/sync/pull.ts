@@ -1,10 +1,16 @@
 import { errorMessage } from "../errors";
 import { PAGE_ID_KEY, PAGE_TITLE_KEY } from "../frontmatterKeys";
 import { joinPath, parentOf } from "../paths";
-import { MERGE_FORMAT, adfToMergeMarkdown } from "./adfMarkdown";
+import { MERGE_FORMAT, adfToMergeMarkdown, neutralizeLegacyBase } from "./adfMarkdown";
 import type { ConfluenceRemote, RemoteChild, RemotePage } from "./confluenceRemote";
 import { mediaReferences, mermaidDiagrams, type MediaResolver, type MediaSync } from "./media";
-import { hasConflictMarkers, mergeThreeWay, mergeTwoWay, splitFrontmatter } from "./merge";
+import {
+	hasConflictMarkers,
+	mergeThreeWay,
+	mergeTwoWay,
+	sameLines,
+	splitFrontmatter,
+} from "./merge";
 import { createPageLinkResolver, rewritePageLinks, type PageLinkResolver } from "./pageLinks";
 import { isFolderNote } from "./partialPublish";
 import { toNoteName } from "./names";
@@ -21,7 +27,8 @@ export interface PullVault {
 	replace(path: string, expected: string, next: string): Promise<void>;
 	/** Set frontmatter keys on a note. */
 	setFrontmatter(path: string, values: Record<string, string>): Promise<void>;
-	exists(path: string): boolean;
+	/** True when a file or folder has this path, ignoring case where the file system does. */
+	pathInUse(path: string): Promise<boolean>;
 	/** Create a note, and any missing parent folders. */
 	create(path: string, body: string, frontmatter: Record<string, string>): Promise<void>;
 	/** The note's current fingerprint, or undefined when it must always be published. */
@@ -50,7 +57,14 @@ export interface PullReport {
 	renamed: { path: string; title: string }[];
 	deleted: string[];
 	skipped: { name: string; reason: string }[];
+	/**
+	 * Notes with no snapshot whose page you edited last. Confluence's version was taken as the
+	 * base without changing the note; an edit you made in Confluence isn't in the note.
+	 */
+	noHistory: string[];
 	unchanged: number;
+	/** The pull was cancelled; the lists cover the notes handled before that. */
+	cancelled?: boolean;
 }
 
 /** A page the publisher just uploaded. */
@@ -123,6 +137,7 @@ export class PullService {
 			renamed: [],
 			deleted: [],
 			skipped: [],
+			noHistory: [],
 			unchanged: 0,
 		};
 		const linked = this.vault.linkedNotes();
@@ -141,7 +156,7 @@ export class PullService {
 		const ids = options.pageIds ?? [...linked.keys()];
 		const versions = await this.remote.getVersions(ids);
 		for (const [index, pageId] of ids.entries()) {
-			options.signal?.throwIfAborted();
+			if (options.signal?.aborted) return { ...report, cancelled: true };
 			const path = linked.get(pageId);
 			if (!path) continue;
 			options.onProgress?.(`Pulling ${index + 1} of ${ids.length}: ${path}`);
@@ -153,7 +168,7 @@ export class PullService {
 		}
 
 		for (const { page, path, frontmatter } of planned) {
-			options.signal?.throwIfAborted();
+			if (options.signal?.aborted) return { ...report, cancelled: true };
 			options.onProgress?.(`Importing ${path}`);
 			try {
 				const converted = await this.convert(
@@ -175,8 +190,10 @@ export class PullService {
 
 	/**
 	 * After a publish, record what Confluence now holds as the base for the next pull. Nothing
-	 * is downloaded: images uploaded from this vault are matched by name. Returns the pages
-	 * whose base couldn't be saved.
+	 * is downloaded: images uploaded from this vault are matched by name. A page that someone
+	 * else saved after the upload keeps its old base, so the next pull merges their edit
+	 * instead of taking it as already in the note. Returns the pages whose base couldn't be
+	 * saved.
 	 */
 	async recordPublished(
 		pages: readonly PublishedPage[],
@@ -195,7 +212,7 @@ export class PullService {
 					continue;
 				}
 				const page = await this.remote.getPage(pageId);
-				if (!page) continue;
+				if (!page || page.authorId !== (await this.currentAccountId())) continue;
 				const path = linked.get(pageId);
 				const sources = path ? [await this.vault.read(path)] : [];
 				const converted = await this.convert(page, urls, resolve, sources);
@@ -259,19 +276,26 @@ export class PullService {
 		const { frontmatter, body } = splitFrontmatter(local);
 		let merged;
 		if (base) {
-			merged = mergeThreeWay(body, base.markdown, remote.markdown);
+			merged = mergeThreeWay(
+				body,
+				neutralizeLegacyBase(base.markdown, base.format),
+				remote.markdown,
+			);
 		} else if (page.authorId === (await this.currentAccountId())) {
 			// Published before pull existed and not edited by anyone else since: Confluence
 			// holds our own content, so record it as the base without touching the note. The
 			// note may have changed since, so it isn't marked as in sync.
 			await this.recordBase(page, remote, undefined);
+			report.noHistory.push(path);
 			report.unchanged++;
 			return;
 		} else {
 			merged = mergeTwoWay(body, remote.markdown);
 		}
 
-		if (merged.text !== body) await this.vault.replace(path, local, frontmatter + merged.text);
+		// Only rewrite the note when a line changed, not just its trailing blank lines.
+		const changed = !sameLines(merged.text, body);
+		if (changed) await this.vault.replace(path, local, frontmatter + merged.text);
 		if (base && page.title !== base.title) {
 			await this.vault.setFrontmatter(path, { [PAGE_TITLE_KEY]: page.title });
 			report.renamed.push({ path, title: page.title });
@@ -284,7 +308,7 @@ export class PullService {
 		);
 
 		if (merged.conflicts > 0) report.conflicted.push(path);
-		else if (merged.text !== body) report.updated.push(path);
+		else if (changed) report.updated.push(path);
 		else report.unchanged++;
 	}
 
@@ -296,6 +320,7 @@ export class PullService {
 	): Promise<PlannedImport[]> {
 		const { rootPageId } = options.importUnder!;
 		const planned: PlannedImport[] = [];
+		/** Planned note paths in lower case, because Windows and macOS file names ignore case. */
 		const plannedPaths = new Set<string>();
 		const visited = new Set<string>([rootPageId]);
 		const rootChildren = await this.remote.listChildren(rootPageId);
@@ -365,7 +390,7 @@ export class PullService {
 
 		const path =
 			children.length > 0 ? joinPath(childFolder, `${name}.md`) : joinPath(folder, `${name}.md`);
-		if (this.vault.exists(path) || plannedPaths.has(path)) {
+		if (plannedPaths.has(path.toLowerCase()) || (await this.vault.pathInUse(path))) {
 			report.skipped.push({
 				name: page.title,
 				reason: `A note already exists at ${path}. Add ${PAGE_ID_KEY}: ${page.id} to it to link it.`,
@@ -375,7 +400,7 @@ export class PullService {
 		const frontmatter: Record<string, string> = { [PAGE_ID_KEY]: page.id };
 		if (name !== page.title) frontmatter[PAGE_TITLE_KEY] = page.title;
 		pathsById.set(page.id, path);
-		plannedPaths.add(path);
+		plannedPaths.add(path.toLowerCase());
 		return {
 			children,
 			folder: children.length > 0 ? childFolder : undefined,

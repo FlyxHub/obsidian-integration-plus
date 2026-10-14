@@ -175,6 +175,8 @@ test("a busy callback port gives a useful error without opening the browser", as
 });
 test("callback addresses must be explicit IPv4 loopback and contain no credentials or query", () => {
 	expect(oauthCallbackUrl("http://127.0.0.1:8766/callback").port).toBe("8766");
+	// Port 80 is the HTTP default, which the parsed URL leaves out.
+	expect(oauthCallbackUrl("http://127.0.0.1:80/callback").host).toBe("127.0.0.1");
 	for (const url of [
 		"http://localhost:8766/callback",
 		"http://0.0.0.0:8766/callback",

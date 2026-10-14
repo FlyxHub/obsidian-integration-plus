@@ -51,7 +51,17 @@ export function publishSettingsKey(settings: ObsidianPluginSettings): string {
 		settings.mermaid ?? null,
 		settings.kroki ?? null,
 		settings.plantuml,
+		// Added later, and only when set, so existing fingerprints stay valid.
+		...optional("siteUrl", settings.confluenceSiteUrl),
+		...optional("header", settings.pageHeaderMarkdown),
+		...optional("footer", settings.pageFooterMarkdown),
+		...optional("ignoredLanguages", settings.ignoredCodeBlockLanguages),
 	]);
+}
+
+function optional(name: string, value: unknown): unknown[] {
+	const empty = value === undefined || value === "" || (Array.isArray(value) && !value.length);
+	return empty ? [] : [[name, value]];
 }
 
 /** Dataview results can change without the note changing, so these notes are always sent. */

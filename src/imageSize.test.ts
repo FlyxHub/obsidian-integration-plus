@@ -51,3 +51,12 @@ test("returns undefined for other formats and truncated files", () => {
 	expect(imageSize(bytes(0x89, "PNG"))).toBeUndefined();
 	expect(imageSize(new Uint8Array())).toBeUndefined();
 });
+
+test("keeps a JPEG's size when its EXIF block is damaged, and ignores cut-off WebP headers", () => {
+	const frame = [0xff, 0xc0, ...u16be(17), 8, ...u16be(600), ...u16be(800), 3];
+	const tiff = [..."MM".split("").map((c) => c.charCodeAt(0)), 0, 42, ...u32be(0x7fffffff)];
+	const exif = [...bytes("Exif", 0, 0), ...tiff];
+	const app1 = [0xff, 0xe1, ...u16be(exif.length + 2), ...exif];
+	expect(imageSize(bytes(0xff, 0xd8, app1, frame))).toEqual({ width: 800, height: 600 });
+	expect(imageSize(bytes("RIFF", u32le(0), "WEBP", "VP8L", u32le(0)))).toBeUndefined();
+});

@@ -32,3 +32,15 @@ export function decodeLink(value: string): string {
 		return value;
 	}
 }
+
+/**
+ * Parse a URL, or undefined when it isn't one. `URL.parse` and `URL.canParse` need newer
+ * Electron versions than some Obsidian installers ship.
+ */
+export function parseUrl(value: string, base?: string | URL): URL | undefined {
+	try {
+		return new URL(value, base);
+	} catch {
+		return undefined;
+	}
+}

@@ -79,3 +79,26 @@ test("only treats page URLs on the configured site as page links", () => {
 	expect(pageLinkTarget("123", SITE)).toBeUndefined();
 	expect(pageLinkTarget("javascript:alert(1)", SITE)).toBeUndefined();
 });
+
+test("keeps the web link when the heading anchor could break out of the wikilink", () => {
+	const injected = [
+		"#x%5D%5D%0A%0A%60%60%60dataviewjs%0Adv.span%60pwn%60%0A%60%60%60",
+		"#x%5D%5D%20%21%5B%5Bsecret.md%5D%5D",
+		"#a%7Cb",
+	];
+	for (const anchor of injected) {
+		const link = `[click](${url("1")}${anchor})`;
+		expect(rewrite(link).markdown).toBe(link);
+	}
+	expect(rewrite(`[click](${url("1")}#Getting-started)`).markdown).toBe(
+		"[[Local Admin Access#Getting started|click]]",
+	);
+});
+
+test("leaves images and escaped brackets that point to pages alone", () => {
+	for (const text of [`![](${url("1")})`, `\\[x](${url("1")})`])
+		expect(rewrite(text).markdown).toBe(text);
+	// An escaped `!` is text before a link, and an escaped backslash is text before one.
+	expect(rewrite(`Wow\\![x](${url("1")})`).markdown).toBe("Wow\\![[Local Admin Access|x]]");
+	expect(rewrite(`\\\\[x](${url("1")})`).markdown).toBe("\\\\[[Local Admin Access|x]]");
+});

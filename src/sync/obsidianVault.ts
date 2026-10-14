@@ -23,28 +23,48 @@ export function createNoteFingerprinter(
 	settings: ObsidianPluginSettings,
 ): NoteFingerprinter {
 	const settingsKey = publishSettingsKey(settings);
+	const stamp = (link: string, embedded: TFile | null) =>
+		embedded
+			? `embed:${embedded.path}:${embedded.stat.mtime}:${embedded.stat.size}`
+			: `embed:${link}:missing`;
 	return async (path) => {
 		const file = app.vault.getFileByPath(normalizePath(path));
 		if (!file) return undefined;
 		const text = await app.vault.read(file);
 		if (hasLiveQueries(text, settings)) return undefined;
 		const { embeds, links } = noteReferences(text);
-		const target = (link: string) => app.metadataCache.getFirstLinkpathDest(link, file.path);
+		const target = (link: string, source: TFile) =>
+			app.metadataCache.getFirstLinkpathDest(link, source.path);
 		const dependencies = [
-			...embeds.map((link) => {
-				const embedded = target(link);
-				return embedded
-					? `embed:${embedded.path}:${embedded.stat.mtime}:${embedded.stat.size}`
-					: `embed:${link}:missing`;
-			}),
+			...embeds.map((link) => stamp(link, target(link, file))),
 			...links.map((link) => {
-				const linked = target(link);
+				const linked = target(link, file);
 				return `link:${link}:${linked?.path ?? ""}:${linked ? (linkedPageId(app, linked) ?? "") : ""}`;
 			}),
 		];
+		// The publisher copies embedded notes into the page with their own embeds, so files
+		// those embed count too, and a Dataview query in one makes the note always publish.
+		const visited = new Set([file.path]);
+		const pending = embeds.map((link) => ({ embedded: target(link, file), depth: 1 }));
+		for (let next = pending.shift(); next; next = pending.shift()) {
+			const { embedded, depth } = next;
+			if (embedded?.extension !== "md" || visited.has(embedded.path)) continue;
+			visited.add(embedded.path);
+			const embeddedText = await app.vault.cachedRead(embedded);
+			if (hasLiveQueries(embeddedText, settings)) return undefined;
+			if (depth >= MAX_EMBED_DEPTH) continue;
+			for (const link of noteReferences(embeddedText).embeds) {
+				const nested = target(link, embedded);
+				dependencies.push(stamp(link, nested));
+				pending.push({ embedded: nested, depth: depth + 1 });
+			}
+		}
 		return fingerprintNote({ path: file.path, text, dependencies, settings: settingsKey });
 	};
 }
+
+/** How deep the publisher follows notes embedded in embedded notes. */
+const MAX_EMBED_DEPTH = 50;
 
 export function createObsidianPullVault(
 	app: App,
@@ -84,6 +104,8 @@ export function createObsidianPullVault(
 
 		filePaths: () => app.vault.getFiles().map((file) => file.path),
 
+		readBinary: async (path) => new Uint8Array(await app.vault.readBinary(fileAt(path))),
+
 		async writeBinary(path, data) {
 			const filePath = normalizePath(path);
 			await ensureFolder(parentOf(filePath));
@@ -103,12 +125,24 @@ export function createObsidianPullVault(
 
 		exists: (path) => app.vault.getAbstractFileByPath(normalizePath(path)) !== null,
 
+		// The vault compares paths by case, but Windows and macOS file names don't, so ask the
+		// file system: writing `design.md` next to `Design.md` would replace it there.
+		pathInUse: async (path) =>
+			app.vault.getAbstractFileByPath(normalizePath(path)) !== null ||
+			(await app.vault.adapter.exists(normalizePath(path))),
+
 		fingerprint,
 
 		async create(path, body, frontmatter) {
 			const notePath = normalizePath(path);
 			await ensureFolder(parentOf(notePath));
-			await assignFrontmatter(await app.vault.create(notePath, body), frontmatter);
+			// A body that starts with `---` would be read as frontmatter.
+			const text = body.startsWith("---") ? `\n${body}` : body;
+			// Pulled content is written under another extension and then renamed, so plugins that
+			// run commands in new notes, such as Templater, never run it.
+			const file = await app.vault.create(`${notePath}.${crypto.randomUUID()}.tmp`, text);
+			await app.vault.rename(file, notePath);
+			await assignFrontmatter(file, frontmatter);
 		},
 	};
 }

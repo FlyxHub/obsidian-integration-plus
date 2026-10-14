@@ -19,7 +19,15 @@ export interface MermaidStyles {
 export interface ObsidianMermaid {
 	initialize(config: MermaidConfig): void;
 	render(id: string, text: string): Promise<{ svg: string }>;
-	mermaidAPI: { getConfig(): MermaidConfig };
+	mermaidAPI: { getConfig(): MermaidConfig; getSiteConfig?(): MermaidConfig };
+}
+
+/**
+ * Obsidian's own Mermaid configuration. `getConfig` also holds the `%%{init}%%` directives of
+ * the last diagram rendered, which must not become everyone's configuration.
+ */
+export function mermaidSiteConfig(mermaid: ObsidianMermaid): MermaidConfig {
+	return mermaid.mermaidAPI.getSiteConfig?.() ?? mermaid.mermaidAPI.getConfig();
 }
 
 /** Undocumented but long-standing Vault API for reading app config such as the active theme. */
@@ -57,7 +65,7 @@ export async function loadMermaidStyles(app: App, theme: MermaidTheme): Promise<
 
 	const mermaid = (await loadMermaid()) as ObsidianMermaid;
 	const mermaidConfig: MermaidConfig = {
-		...mermaid.mermaidAPI.getConfig(),
+		...mermaidSiteConfig(mermaid),
 		theme: bodyStyles.split(/\s+/).includes("theme-dark") ? "dark" : "default",
 	};
 	// Recompute colors for the selected theme instead of reusing Obsidian's

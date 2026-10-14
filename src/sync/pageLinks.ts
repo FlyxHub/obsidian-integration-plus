@@ -12,8 +12,11 @@ export interface RewrittenLinks {
 }
 
 const TABLE_ROW = /^\s*(?:>\s?)*\|/;
-const MARKDOWN_LINK = /\[((?:[^[\]\\]|\\.)*)\]\(([^()\s]+)\)/g;
+/** A Markdown link, with the backslashes and `!` before it, to tell links from images. */
+const MARKDOWN_LINK = /(\\*)(!?)\[((?:[^[\]\\]|\\.)*)\]\(([^()\s]+)\)/g;
 const MARKDOWN_ESCAPE = /\\([\\`*_{}[\]()#+\-.!|<>~])/g;
+/** Characters that end or change a wikilink, start code, or break the line. */
+const UNSAFE_ANCHOR = /[[\]|#^`\\<>\p{Cc}]/u;
 
 /**
  * Turn links to Confluence pages into Obsidian wikilinks to the notes linked to those pages.
@@ -27,17 +30,25 @@ export function rewritePageLinks(
 ): RewrittenLinks {
 	const unresolved = new Set<string>();
 	const rewritten = mapOutsideCode(markdown, (segment, line) =>
-		segment.replace(MARKDOWN_LINK, (link, text: string, href: string) => {
-			const target = pageLinkTarget(href, siteUrl);
-			if (!target) return link;
-			const linkText = resolve(target.pageId);
-			if (!linkText) {
-				unresolved.add(target.pageId);
-				return link;
-			}
-			const separator = TABLE_ROW.test(line) ? "\\|" : "|";
-			return toWikilink(linkText, target.anchor, text, href, separator) ?? link;
-		}),
+		segment.replace(
+			MARKDOWN_LINK,
+			(match, slashes: string, bang: string, text: string, href: string) => {
+				// An odd number of backslashes escapes what follows: `\[` isn't a link, and `\!`
+				// is a literal `!` before one. Images stay images.
+				if (slashes.length % 2 === 1 ? !bang : !!bang) return match;
+				const prefix = slashes + bang;
+				const target = pageLinkTarget(href, siteUrl);
+				if (!target) return match;
+				const linkText = resolve(target.pageId);
+				if (!linkText) {
+					unresolved.add(target.pageId);
+					return match;
+				}
+				const separator = TABLE_ROW.test(line) ? "\\|" : "|";
+				const wikilink = toWikilink(linkText, target.anchor, text, href, separator);
+				return wikilink ? prefix + wikilink : match;
+			},
+		),
 	);
 	return { markdown: rewritten, unresolved: [...unresolved] };
 }
@@ -77,8 +88,9 @@ function toWikilink(
 	separator: string,
 ): string | undefined {
 	const text = rawText.replace(MARKDOWN_ESCAPE, "$1");
-	// Wikilink aliases can't contain these; keep the web link rather than break the text.
-	if (/\||\[\[|\]\]/.test(text)) return undefined;
+	// Wikilinks can't hold these, and the anchor comes from a URL that anyone who can edit the
+	// page chooses: unchecked, it could close the link and add Markdown. Keep the web link.
+	if (/[|`]|\[\[|\]\]/.test(text) || UNSAFE_ANCHOR.test(anchor)) return undefined;
 	const target = anchor ? `${linkText}#${anchor}` : linkText;
 	// Without an alias, Obsidian shows the link target and publishing uses it as the link
 	// text, so drop the alias only when it's exactly the target. Smart links show the URL as

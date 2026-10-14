@@ -1,5 +1,11 @@
 import { expect, test } from "@effect/vitest";
-import { hasConflictMarkers, mergeThreeWay, mergeTwoWay, splitFrontmatter } from "./merge";
+import {
+	hasConflictMarkers,
+	mergeThreeWay,
+	mergeTwoWay,
+	sameLines,
+	splitFrontmatter,
+} from "./merge";
 
 const base = "# Plan\n\nIntro.\n\nMiddle.\n\nOutro.\n";
 
@@ -72,4 +78,16 @@ test("splits frontmatter and normalizes line endings", () => {
 test("detects conflict markers only when both ends are present", () => {
 	expect(hasConflictMarkers("text\n=======\nmore")).toBe(false);
 	expect(hasConflictMarkers("<<<<<<< Obsidian\na\n=======\nb\n>>>>>>> Confluence\n")).toBe(true);
+});
+
+test("a single conflict marker left in the note still counts", () => {
+	expect(hasConflictMarkers("<<<<<<< Obsidian\nA\n=======\nB\n")).toBe(true);
+	expect(hasConflictMarkers("A\n=======\nB\n>>>>>>> Confluence\n")).toBe(true);
+	expect(hasConflictMarkers("Heading\n=======\n")).toBe(false);
+});
+
+test("compares texts by their lines", () => {
+	expect(sameLines("A\nB\n", "A\r\nB\n\n")).toBe(true);
+	expect(sameLines("A\nB", "A\nB\n")).toBe(true);
+	expect(sameLines("A\n", "A\n\nB\n")).toBe(false);
 });

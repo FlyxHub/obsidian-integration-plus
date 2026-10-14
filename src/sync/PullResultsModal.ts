@@ -18,7 +18,7 @@ export class PullResultsModal extends Modal {
 			return;
 		}
 		const report = this.report;
-		this.setTitle("Pull finished");
+		this.setTitle(report.cancelled ? "Pull cancelled" : "Pull finished");
 		contentEl.createEl("p", { text: summarizePull(report) });
 
 		if (report.conflicted.length > 0) {
@@ -36,6 +36,13 @@ export class PullResultsModal extends Modal {
 			report.renamed.map(({ path, title }) => `${path} → ${title}`),
 		);
 		section(contentEl, "Page deleted in Confluence (note kept)", report.deleted);
+		if (report.noHistory.length > 0) {
+			contentEl.createEl("h4", { text: "No sync history" });
+			contentEl.createEl("p", {
+				text: "These notes had no record of their last publish, and you edited their pages last, so Confluence's version was taken as published from these notes. If you edited a page in Confluence since then, copy that edit into the note before you publish it, or it will be overwritten.",
+			});
+			list(contentEl, report.noHistory);
+		}
 		section(
 			contentEl,
 			"Skipped",
@@ -56,7 +63,7 @@ export function summarizePull(report: PullReport): string {
 		`${report.unchanged} unchanged`,
 	];
 	if (report.skipped.length > 0) parts.push(`${report.skipped.length} skipped`);
-	return `Pull finished: ${parts.join(", ")}.`;
+	return `${report.cancelled ? "Pull cancelled" : "Pull finished"}: ${parts.join(", ")}.`;
 }
 
 function section(containerEl: HTMLElement, heading: string, items: string[]) {

@@ -21,22 +21,33 @@ export interface PublishCheck {
 export const NEEDS_PULL =
 	"Confluence has changes that you haven't pulled. Pull this note, then publish again.";
 export const HAS_CONFLICTS = "Resolve the merge conflict markers in this note, then publish again.";
+export const SHARED_PAGE = (other: string) =>
+	`${other} is linked to the same Confluence page. Remove connie-page-id from the copy, then publish again.`;
 
 /**
  * Like `git push`, refuse to publish over Confluence changes that haven't been pulled.
  * Pages with no recorded base keep the publisher's own check, which refuses to overwrite a
- * page that another user edited last.
+ * page that another user edited last. `allNotes` are the other notes that publish, so that
+ * two notes linked to one page, as after copying a note, are caught.
  */
 export async function checkBeforePublish(
 	notes: readonly NoteToPublish[],
 	remote: ConfluenceRemote,
 	state: SyncStateStore,
+	allNotes: readonly NoteToPublish[] = notes,
 ): Promise<PublishCheck> {
 	const blocked: PublishCheck["blocked"] = [];
 	const upToDate = new Set<string>();
 	const linked: { path: string; pageId: string }[] = [];
+	const pathsByPage = new Map<string, string[]>();
+	for (const { pageId, path } of allNotes)
+		if (pageId) pathsByPage.set(pageId, [...(pathsByPage.get(pageId) ?? []), path]);
 	for (const note of notes) {
+		const other = note.pageId
+			? pathsByPage.get(note.pageId)?.find((path) => path !== note.path)
+			: undefined;
 		if (hasConflictMarkers(note.text)) blocked.push({ fileName: note.path, reason: HAS_CONFLICTS });
+		else if (other) blocked.push({ fileName: note.path, reason: SHARED_PAGE(other) });
 		else if (note.pageId) linked.push({ path: note.path, pageId: note.pageId });
 	}
 

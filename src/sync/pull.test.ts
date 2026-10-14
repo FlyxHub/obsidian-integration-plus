@@ -1,8 +1,15 @@
+import { createHash } from "node:crypto";
 import { expect, test } from "@effect/vitest";
 import { getMermaidFileName, parseMarkdownToADF } from "@markdown-confluence/lib";
 import { MERGE_FORMAT, adfToMergeMarkdown } from "./adfMarkdown";
 import type { ConfluenceRemote, RemoteChild, RemotePage } from "./confluenceRemote";
-import { HAS_CONFLICTS, NEEDS_PULL, checkBeforePublish, findChangedNotes } from "./publishGate";
+import {
+	HAS_CONFLICTS,
+	NEEDS_PULL,
+	SHARED_PAGE,
+	checkBeforePublish,
+	findChangedNotes,
+} from "./publishGate";
 import { isFolderNote } from "./partialPublish";
 import { PullService, isGeneratedFolderPage, type PullVault } from "./pull";
 import { MediaSync, safeFileName } from "./media";
@@ -85,7 +92,8 @@ function fakeVault(files: Record<string, string>) {
 		setFrontmatter: async (path, values) =>
 			void frontmatter.set(path, { ...frontmatter.get(path), ...values }),
 		notePaths: () => Object.keys(files),
-		exists: (path) => path in files,
+		pathInUse: async (path) =>
+			Object.keys(files).some((file) => file.toLowerCase() === path.toLowerCase()),
 		create: async (path, body, values) => {
 			files[path] = body;
 			frontmatter.set(path, values);
@@ -168,6 +176,7 @@ test("pull with no base records our own last publish without changing the note",
 	const report = await new PullService(remote, vault, store, NO_MEDIA).pull(OPTIONS);
 	expect(files["A.md"]).toBe(note);
 	expect(report.unchanged).toBe(1);
+	expect(report.noHistory).toEqual(["A.md"]);
 	expect(bases.get("1")?.version).toBe(5);
 });
 
@@ -423,6 +432,8 @@ test("imports images as embeds of downloaded files in the image folder", async (
 	const mediaVault = {
 		filePaths: () => [...Object.keys(files), ...Object.keys(binaries)],
 		exists: (path: string) => path in files || path in binaries,
+		pathInUse: async (path: string) => path in files || path in binaries,
+		readBinary: async (path: string) => binaries[path] ?? new Uint8Array(),
 		writeBinary: async (path: string, data: Uint8Array) => void (binaries[path] = data),
 	};
 	const remote = fakeRemote([{ ...page("30", "", 1, { title: "With image" }), adf: pageAdf }], {
@@ -455,18 +466,25 @@ test("imports images as embeds of downloaded files in the image folder", async (
 test("reuses downloaded and published images instead of downloading again", async () => {
 	const files: Record<string, string> = {
 		"images/diagram.png": "",
-		"Docs/local.png": "",
+		"Docs/local.png": "local image",
 	};
 	const vault = {
 		filePaths: () => Object.keys(files),
 		exists: (path: string) => path in files,
+		pathInUse: async (path: string) => path in files,
+		readBinary: async (path: string) => new TextEncoder().encode(files[path]),
 		writeBinary: async () => {
 			throw new Error("should not download");
 		},
 	};
 	const mediaRemote = {
 		listAttachments: async () => [
-			{ id: "a2", title: "0123456789abcdef0123456789abcdef-local.png", fileId: "published" },
+			{
+				id: "a2",
+				title: "0123456789abcdef0123456789abcdef-local.png",
+				fileId: "published",
+				hash: createHash("md5").update("local image").digest("hex"),
+			},
 		],
 		downloadAttachment: async () => {
 			throw new Error("should not download");
@@ -512,6 +530,8 @@ test("pulls a published Mermaid diagram back as its source, not its image", asyn
 	const mediaVault = {
 		filePaths: () => [...Object.keys(files), ...downloaded],
 		exists: (path: string) => path in files || downloaded.includes(path),
+		pathInUse: async (path: string) => path in files || downloaded.includes(path),
+		readBinary: async () => new Uint8Array(),
 		writeBinary: async (path: string) => void downloaded.push(path),
 	};
 	const mediaRemote = {
@@ -519,7 +539,7 @@ test("pulls a published Mermaid diagram back as its source, not its image", asyn
 		downloadAttachment: async () => new Uint8Array([1]),
 	};
 	const sync = () => new MediaSync(mediaRemote, mediaVault, store, "images");
-	let remote = fakeRemote([{ ...page("1", "", 2), adf: pageAdf("Text.") }]);
+	let remote = fakeRemote([{ ...page("1", "", 2, { authorId: ME }), adf: pageAdf("Text.") }]);
 	await new PullService(remote, vault, store, sync()).recordPublished(
 		[{ pageId: "1", unchanged: false, fingerprint: undefined }],
 		OPTIONS,
@@ -548,7 +568,10 @@ test("names downloaded files safely and without overwriting", () => {
 test("records published pages as pull bases, skipping unchanged pages already recorded", async () => {
 	const { vault } = fakeVault({ "A.md": '---\nconnie-page-id: "1"\n---\nText.\n' });
 	const { store, bases } = fakeState([base("2", "Old.\n", 1)]);
-	const pages = fakeRemote([page("1", "Text.\n", 4), page("2", "Changed.\n", 2)]);
+	const pages = fakeRemote([
+		page("1", "Text.\n", 4, { authorId: ME }),
+		page("2", "Changed.\n", 2, { authorId: ME }),
+	]);
 	const remote: ConfluenceRemote = {
 		...pages,
 		getPage: async (id) => {
@@ -629,4 +652,152 @@ test("publishing changes skips notes whose fingerprint matches the last sync", a
 		path === "A.md" ? "same" : "new",
 	);
 	expect(changed.map((note) => note.path)).toEqual(["B.md", "C.md", "New.md"]);
+});
+
+test("a cancelled pull reports the notes it already handled", async () => {
+	const { vault } = fakeVault({
+		"A.md": '---\nconnie-page-id: "1"\n---\nOne.\n',
+		"B.md": '---\nconnie-page-id: "2"\n---\nTwo.\n',
+	});
+	const { store } = fakeState([base("1", "One.\n", 1), base("2", "Two.\n", 1)]);
+	const controller = new AbortController();
+	const pages = fakeRemote([page("1", "One, edited.\n", 2), page("2", "Two, edited.\n", 2)]);
+	const remote: ConfluenceRemote = {
+		...pages,
+		getPage: async (id) => {
+			controller.abort();
+			return pages.getPage(id);
+		},
+	};
+	const report = await new PullService(remote, vault, store, NO_MEDIA).pull({
+		...OPTIONS,
+		signal: controller.signal,
+	});
+	expect(report.cancelled).toBe(true);
+	expect(report.updated).toEqual(["A.md"]);
+});
+
+test("a page someone else saved right after a publish keeps its old base", async () => {
+	const { vault } = fakeVault({ "A.md": '---\nconnie-page-id: "1"\n---\nMine.\n' });
+	const { store, bases } = fakeState([base("1", "Old.\n", 3)]);
+	const remote = fakeRemote([page("1", "Mine, then theirs.\n", 5)]);
+	await new PullService(remote, vault, store, NO_MEDIA).recordPublished(
+		[{ pageId: "1", unchanged: false, fingerprint: "fp" }],
+		OPTIONS,
+	);
+	expect(bases.get("1")).toMatchObject({ version: 3, markdown: "Old.\n" });
+});
+
+const mediaDoc = (...ids: string[]) => ({
+	type: "doc",
+	content: ids.map((id) => ({
+		type: "mediaSingle",
+		content: [{ type: "media", attrs: { id, type: "file", collection: "contentId-5" } }],
+	})),
+});
+
+test("an attachment named like a published file must also match its content", async () => {
+	const vault = {
+		filePaths: () => ["Private/passport.jpg"],
+		exists: () => true,
+		pathInUse: async () => true,
+		readBinary: async () => new TextEncoder().encode("secret"),
+		writeBinary: async () => {
+			throw new Error("should not download");
+		},
+	};
+	const mediaRemote = {
+		listAttachments: async () => [
+			{
+				id: "a1",
+				title: "00000000000000000000000000000000-passport.jpg",
+				fileId: "f1",
+				hash: "0".repeat(32),
+			},
+		],
+		downloadAttachment: async () => {
+			throw new Error("should not download");
+		},
+	};
+	const sync = new MediaSync(mediaRemote, vault, fakeState().store, "images");
+	await sync.ensure(mediaDoc("f1"), { download: false, diagrams: new Map() });
+	expect(sync.resolver()("f1")).toBeUndefined();
+});
+
+test("attachments that Obsidian would open as notes aren't downloaded", async () => {
+	const written: string[] = [];
+	const vault = {
+		filePaths: () => [],
+		exists: () => false,
+		pathInUse: async () => false,
+		readBinary: async () => new Uint8Array(),
+		writeBinary: async (path: string) => void written.push(path),
+	};
+	const mediaRemote = {
+		listAttachments: async () => [
+			{ id: "a1", title: "notes.md", fileId: "f1" },
+			{ id: "a2", title: "README", fileId: "f2" },
+		],
+		downloadAttachment: async () => new TextEncoder().encode("```dataviewjs\n```"),
+	};
+	const sync = new MediaSync(mediaRemote, vault, fakeState().store, "images");
+	const errors = await sync.ensure(mediaDoc("f1", "f2"), { download: true, diagrams: new Map() });
+	expect(written).toEqual([]);
+	expect(errors).toHaveLength(2);
+});
+
+test("refuses to publish two notes linked to the same page", async () => {
+	const notes = [
+		{ path: "A.md", pageId: "1", text: "" },
+		{ path: "A copy.md", pageId: "1", text: "" },
+	];
+	const check = await checkBeforePublish(
+		[notes[0]!],
+		fakeRemote([page("1", "", 1)]),
+		fakeState().store,
+		notes,
+	);
+	expect(check.blocked).toEqual([{ fileName: "A.md", reason: SHARED_PAGE("A copy.md") }]);
+});
+
+test("doesn't import over a note whose name differs only in case", async () => {
+	const { vault, files } = fakeVault({ "Docs/new page.md": "Mine.\n" });
+	const remote = fakeRemote([page("30", "Imported.\n", 1, { title: "New page" })], {
+		root: [{ id: "30", title: "New page" }],
+	});
+	const report = await new PullService(remote, vault, fakeState().store, NO_MEDIA).pull({
+		...OPTIONS,
+		importUnder: { rootPageId: "root", rootFolder: "Docs" },
+	});
+	expect(report.imported).toEqual([]);
+	expect(files["Docs/new page.md"]).toBe("Mine.\n");
+});
+
+test("a new version with the same content leaves the note untouched", async () => {
+	const note = '---\nconnie-page-id: "1"\n---\nText.\n\n';
+	const { vault, files } = fakeVault({ "A.md": note });
+	const { store } = fakeState([base("1", "Text.\n", 1)]);
+	const remote = fakeRemote([page("1", "Text.\n", 2)]);
+	const report = await new PullService(remote, vault, store, NO_MEDIA).pull(OPTIONS);
+	expect(files["A.md"]).toBe(note);
+	expect(report.updated).toEqual([]);
+	expect(report.unchanged).toBe(1);
+});
+
+test("a pull keeps your quoted code blocks when the snapshot predates neutralizing them", async () => {
+	const block = "> ```dataviewjs\n> dv.paragraph(1)\n> ```";
+	const note = `---\nconnie-page-id: "1"\n---\n${block}\n\nOutro.\n`;
+	const { vault, files } = fakeVault({ "A.md": note });
+	const { store } = fakeState([
+		{ ...base("1", "", 1), markdown: `${block}\n\nOutro.\n`, format: 7 },
+	]);
+	const remote = fakeRemote([page("1", `${block}\n\nOutro, edited.\n`, 2)]);
+	await new PullService(remote, vault, store, NO_MEDIA).pull(OPTIONS);
+	expect(files["A.md"]).toBe(note.replace("Outro.", "Outro, edited."));
+});
+
+test("note names stay valid file names on Windows after shortening", () => {
+	expect(toNoteName(`${"a".repeat(179)}.b`, "1")).toBe("a".repeat(179));
+	expect(toNoteName("con.txt", "1")).toBe("con page.txt");
+	expect(toNoteName("Console", "1")).toBe("Console");
 });

@@ -44,6 +44,7 @@ export function createConfluenceRemote(
 				id: attachment.id,
 				title: attachment.title,
 				fileId: attachment.extensions.fileId,
+				hash: attachment.metadata?.comment,
 			}));
 		},
 
@@ -80,19 +81,25 @@ export function createConfluenceRemote(
 
 		async getVersions(ids) {
 			const versions = new Map<string, number>();
-			for (let start = 0; start < ids.length; start += BATCH_SIZE) {
-				const batch = ids.slice(start, start + BATCH_SIZE);
-				const response = await client.sendRequest<unknown>({
-					method: "GET",
-					url: "/wiki/api/v2/pages",
-					searchParams: { id: batch.join(","), limit: BATCH_SIZE },
-				});
-				for (const entry of resultsOf(response)) {
-					const version = recordOf(entry["version"]);
-					if (typeof entry["id"] !== "string" || typeof version["number"] !== "number") continue;
-					versions.set(entry["id"], version["number"]);
+			const readVersions = async (url: string, wanted: readonly string[]) => {
+				for (let start = 0; start < wanted.length; start += BATCH_SIZE) {
+					const batch = wanted.slice(start, start + BATCH_SIZE);
+					const response = await client.sendRequest<unknown>({
+						method: "GET",
+						url,
+						searchParams: { id: batch.join(","), limit: BATCH_SIZE },
+					});
+					for (const entry of resultsOf(response)) {
+						const version = recordOf(entry["version"]);
+						if (typeof entry["id"] !== "string" || typeof version["number"] !== "number") continue;
+						versions.set(entry["id"], version["number"]);
+					}
 				}
-			}
+			};
+			await readVersions("/wiki/api/v2/pages", ids);
+			// Notes can also publish blog posts, which the pages endpoint leaves out.
+			const missing = ids.filter((id) => !versions.has(id));
+			if (missing.length > 0) await readVersions("/wiki/api/v2/blogposts", missing);
 			return versions;
 		},
 

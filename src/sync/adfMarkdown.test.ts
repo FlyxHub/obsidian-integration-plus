@@ -1,7 +1,7 @@
 import { expect, test } from "@effect/vitest";
 import { parseMarkdownToADF } from "@markdown-confluence/lib";
 import { normalizeCalloutsForPublish } from "../callouts";
-import { adfToMergeMarkdown, neutralizeExecutableMarkdown, sameContent } from "./adfMarkdown";
+import { MERGE_FORMAT, adfToMergeMarkdown, neutralizeLegacyBase, sameContent } from "./adfMarkdown";
 
 const BASE_URL = "https://example.atlassian.net";
 const text = (value: string) => ({ type: "text", text: value });
@@ -104,10 +104,91 @@ test("pulled code blocks that plugins would run as JavaScript become plain text"
 	expect(markdown).not.toContain("dataviewjs");
 });
 
-test("neutralizes executable fences regardless of case, fence style or indentation", () => {
-	expect(neutralizeExecutableMarkdown("~~~~ DataviewJS\nx\n~~~~")).toBe("~~~~text\nx\n~~~~");
-	expect(neutralizeExecutableMarkdown("  ```js-engine\nx\n  ```")).toBe("  ```text\nx\n  ```");
-	expect(neutralizeExecutableMarkdown("```dataview\nLIST\n```")).toBe("```dataview\nLIST\n```");
+test("makes executable code inert wherever it is on the page", () => {
+	const code = (language: string, value = "dv.paragraph(1)") => ({
+		type: "codeBlock",
+		attrs: { language },
+		content: [text(value)],
+	});
+	const item = (...content: unknown[]) => ({ type: "listItem", content });
+	const markdown = adfToMergeMarkdown(
+		doc(
+			{ type: "blockquote", content: [code("dataviewjs")] },
+			{ type: "bulletList", content: [item(code("DataviewJS"))] },
+			{ type: "orderedList", attrs: { order: 1 }, content: [item(code("js-engine"))] },
+			{
+				type: "panel",
+				attrs: { panelType: "info" },
+				content: [paragraph("hi"), code("dataviewjs")],
+			},
+			code("dataview", 'TABLE secret FROM ""'),
+			{
+				type: "paragraph",
+				content: [{ type: "text", text: " $= dv.current()", marks: [{ type: "code" }] }],
+			},
+		),
+		BASE_URL,
+	);
+	expect(markdown).not.toMatch(/dataview|js-engine/i);
+	expect(markdown).not.toMatch(/`\s*\$=/);
+	expect(markdown.match(/```text/g)).toHaveLength(5);
+	// Code inside another code block's content is only text, and stays as it is.
+	const example = adfToMergeMarkdown(doc(code("markdown", "```dataviewjs\nx\n```")), BASE_URL);
+	expect(example).toContain("```dataviewjs\nx\n```");
+});
+
+test("neutralizes executable fences in snapshots from before the ADF was neutralized", () => {
+	const old =
+		"> ```dataviewjs\nx\n> ```\n\n- ~~~ DataviewJS\n\n```dataview\nLIST\n```\n\n` $= x`\n";
+	expect(neutralizeLegacyBase(old, 7)).toBe(
+		"> ```text\nx\n> ```\n\n- ~~~text\n\n```text\nLIST\n```\n\n` $ = x`\n",
+	);
+	expect(neutralizeLegacyBase(old, MERGE_FORMAT)).toBe(old);
+});
+
+test("keeps editor-saved content readable that publishes back the same way", () => {
+	const page = `${BASE_URL}/wiki/spaces/~712020c/pages/4739956737`;
+	const card = {
+		type: "inlineCard",
+		attrs: {
+			url: page,
+			__confluenceMetadata: { contentTitle: "Tickets", linkType: "page", versionAtSave: "11" },
+		},
+	};
+	const item = (...content: unknown[]) => ({
+		type: "listItem",
+		content: [{ type: "paragraph", content }],
+	});
+	const marked = (value: string, ...types: string[]) => ({
+		type: "text",
+		text: value,
+		marks: types.map((type) =>
+			type === "link" ? { type, attrs: { href: "https://example.com/a" } } : { type },
+		),
+	});
+	const markdown = adfToMergeMarkdown(
+		doc(
+			// A smart link to a page in a personal space, which publishes without the `~`.
+			{ type: "bulletList", content: [item(card), item(text("Plain"))] },
+			// Bold text that starts with a space, which Markdown writes outside the bold.
+			{
+				type: "panel",
+				attrs: { panelType: "info" },
+				content: [
+					{ type: "paragraph", content: [text("exist in"), marked(" (N. Virginia)", "strong")] },
+				],
+			},
+			// Marks in another order than the publisher writes them.
+			{ type: "paragraph", content: [text("Open "), marked("Director", "strong", "link")] },
+			// Line breaks alone, or at the start, don't show.
+			{ type: "paragraph", content: [{ type: "hardBreak" }, { type: "hardBreak" }] },
+			{ type: "paragraph", content: [{ type: "hardBreak" }, text("After a break.")] },
+		),
+		BASE_URL,
+	);
+	expect(markdown).not.toContain("```adf");
+	expect(markdown).toContain("**(N. Virginia)**");
+	expect(markdown).toContain("After a break.");
 });
 
 test("pulls Confluence panels as Obsidian callouts", () => {

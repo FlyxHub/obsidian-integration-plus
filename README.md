@@ -21,7 +21,7 @@ The plugin runs on desktop only and requires Obsidian 1.11.4 or later.
 Obsidian's developer policies require plugins to disclose the following behavior:
 
 - **Account:** You need an Atlassian Cloud account with access to a Confluence site.
-- **Network use:** The plugin sends note content, attachments, labels, and page metadata over HTTPS to the Confluence site that you configure. When you pull, it reads pages from that site and writes their content into your notes, and downloads page images and other attachments from Atlassian's media service (`*.atlassian.com`) into your vault. Confluence credentials are never sent to the media service. It contacts `auth.atlassian.com` and `api.atlassian.com` only to sign in with OAuth and to refresh tokens. If you turn on Kroki or PlantUML rendering, the plugin sends diagram source to the server that you configure. The plugin doesn't collect telemetry.
+- **Network use:** The plugin sends note content, attachments, labels, and page metadata over HTTPS to the Confluence site that you configure. When you pull, it reads pages from that site and writes their content into your notes, and downloads page images and other attachments from Atlassian's media service (`*.atlassian.com`) into your vault. Confluence credentials are never sent to the media service. It contacts `auth.atlassian.com` and `api.atlassian.com` only to sign in with OAuth and to refresh tokens. If you turn on Kroki or PlantUML rendering, the plugin sends diagram source to the server that you configure, and follows the PlantUML server's redirects. The plugin doesn't collect telemetry.
 - **Local network listener:** Browser OAuth sign-in starts a temporary HTTP listener on `127.0.0.1` at the callback port that you configure. The listener accepts one matching sign-in response, and then stops. It also stops when you cancel sign-in or after five minutes.
 - **Files other than notes:** To match your Obsidian theme in Mermaid diagrams, the plugin reads the active theme and enabled CSS snippets from the vault's configuration folder. To support pulling, it saves a snapshot of each published page in a `sync` folder inside the plugin's folder. The first time it loads, if it has no settings yet, it reads the settings of the original Confluence Integration plugin, if that plugin is installed. The plugin doesn't read or write files outside the vault.
 - **Vault access:** To find the notes to publish, match Confluence pages to notes, and turn page links into wikilinks, the plugin lists the files and notes in your vault and reads their frontmatter. It reads and changes notes and attachments only through Obsidian's vault API.
@@ -170,7 +170,7 @@ To sign out, click **Disconnect**, which removes this vault's tokens. To revoke 
 After you set up authentication, do the following on the same settings tab:
 
 1. In **Parent page ID**, enter the page ID that you found earlier.
-1. In **Folder to publish**, enter the vault folder that contains the notes to publish.
+1. In **Folder to publish**, enter the vault folder that contains the notes to publish. To publish from the whole vault, enter `.` or `/`.
 
 If a setting needs attention, the plugin lists it at the top of the settings tab.
 
@@ -179,7 +179,7 @@ If a setting needs attention, the plugin lists it at the top of the settings tab
 To publish notes, do any of the following:
 
 - To publish the notes that you changed, click **Publish changes to Confluence** (the cloud upload icon) in the ribbon, or run **Publish changes** from the command palette.
-- To publish only the active note, run **Publish current note**. It publishes the note even if it hasn't changed.
+- To publish only the active note, run **Publish current note**. It publishes the note even if it hasn't changed, as long as the note is selected for publishing.
 - To publish every selected note, run **Republish all notes**.
 - To stop a publish or pull, click the status bar item or run **Cancel publish or pull after the current request**. The plugin keeps pages that it already wrote.
 
@@ -191,10 +191,10 @@ To manage an existing Confluence page from Obsidian, create a note and set its `
 
 **Publish changes** sends only the notes that changed since a publish or pull last left them in sync with Confluence. A note counts as changed when any of the following is true:
 
-- You edited its text or frontmatter, or moved or renamed it.
-- A note or image that it embeds changed, or a note that it links to was published for the first time.
+- You edited its text or frontmatter, or moved or renamed it. This includes edits that you make while a publish is running.
+- A note or image that it embeds changed, including notes and images embedded in those notes, or a note that it links to was published for the first time.
 - It hasn't been published yet, or it was last published with an earlier version of this plugin.
-- It contains a Dataview query, and **Publish Dataview results** is on. Query results can change without the note changing, so these notes are always published.
+- It contains a Dataview query, or embeds a note that does, and **Publish Dataview results** is on. Query results can change without the note changing, so these notes are always published.
 - You changed a setting that affects publishing, such as the parent page, the folder to publish, or a diagram setting. Every note counts as changed.
 
 Pulling keeps this up to date. A note that was in sync before a pull stays in sync if Confluence's changes merge cleanly. A note that has your unpublished edits stays marked as changed after a pull.
@@ -218,7 +218,9 @@ Two rules take priority:
 - A note with `connie-publish: false` is never published.
 - A note inside a folder listed in **Excluded folders** is never published, even if it has `connie-publish: true`.
 
-To include or exclude the active note, run **Enable publishing for current note** or **Disable publishing for current note**. To edit the note's Confluence properties, such as its title, labels, and content type, run **Edit page settings for current note**.
+To include or exclude the active note, run **Enable publishing for current note** or **Disable publishing for current note**. To edit the note's Confluence properties, such as its title, labels, and content type, run **Edit page settings for current note**. In that dialog, changing a value selects its **Set** checkbox, and clearing the checkbox removes the property from the note when you save.
+
+Two notes can't publish to the same page. If you copy a published note, the copy keeps the original's `connie-page-id`, and publishing stops until you remove it from the copy.
 
 ### Page hierarchy
 
@@ -238,6 +240,8 @@ To pull, do one of the following:
 - To pull only the active note, run **Pull current note**.
 
 When the pull finishes, a dialog lists the notes that were updated, imported, or have conflicts. If a note has conflicts, the dialog opens even when **Show results after publishing** is off.
+
+The dialog also opens when a note has no sync history, for example on a new device, and you were the last to edit its page. The plugin takes the page as published from the note and doesn't change the note. If you edited that page in Confluence, copy the edit into the note before you publish it, because publishing replaces the page.
 
 If a page's title changed in Confluence, the plugin sets the note's `connie-title` property to the new title. It doesn't rename the note file.
 
@@ -299,7 +303,9 @@ The plugin skips a page, and says why in the results dialog, in these cases:
 - Publishing a pulled image uploads your local copy as a new attachment, so the page keeps the original attachment as well.
 - Attachments larger than 100 MB aren't downloaded.
 - Content that Markdown can't represent, such as status lozenges, page layouts, and custom panels with their own icon or color, appears as an `adf` code block. Edit these blocks in Confluence.
-- For security, pulled code blocks that plugins run as JavaScript, such as `dataviewjs` and `js-engine`, become plain `text` code blocks, and Dataview inline JavaScript (`` `$= ...` ``) is disabled. This prevents anyone who can edit a Confluence page from running code in your vault. Code blocks that you wrote in Obsidian aren't changed.
+- For security, pulled code blocks that plugins run as JavaScript, such as `dataviewjs` and `js-engine`, and Dataview queries (`dataview` code blocks) become plain `text` code blocks, wherever they are on the page, and Dataview inline JavaScript (`` `$= ...` ``) is disabled. This prevents anyone who can edit a Confluence page from running code in your vault, or from publishing your vault's data through a query. Code blocks that you wrote in Obsidian aren't changed.
+- For the same reason, attachments that Obsidian would open as notes, such as `.md` and `.canvas` files, and files without an extension aren't downloaded. An attachment is matched to a file in your vault only when its content is the file that you published. Imported notes are created so that plugins that run commands in new notes, such as Templater, don't run them.
+- A link to a section whose anchor contains characters that would break a wikilink, such as `]` or `|`, stays a web link.
 - Short share links, such as `https://example.atlassian.net/wiki/x/AbCd`, don't contain a page ID, so they stay web links.
 - Confluence builds section anchors from heading text, so a heading link can be approximate when a heading contains hyphens or punctuation. The link still opens the right note.
 - A smart link card to a page becomes a wikilink, and publishes back as a smart link card. A wikilink with an alias, such as `[[Local Admin Access|the admin page]]`, publishes as an ordinary link with that text.
@@ -309,7 +315,7 @@ The plugin skips a page, and says why in the results dialog, in these cases:
 
 - **Links:** Wikilinks to published notes, such as `[[Release Checklist]]`, become links to their Confluence pages, even when **Publish changes** doesn't republish the linked note. Links to notes that aren't published become plain text.
 - **Embeds:** The plugin expands note embeds, such as `![[Shared Notes/Release Checklist]]`, before publishing.
-- **Image size:** Images wider than **Maximum image width** (700 pixels by default) are scaled down to that width in Confluence, close to how Obsidian shows them. To set the width of one image, add it to the embed, such as `![[diagram.png|400]]` or `![Diagram|400](diagram.png)`. The height follows from the image's shape. To set both, use `WIDTHxHEIGHT`, such as `![[diagram.png|400x300]]`. Your notes aren't changed.
+- **Image size:** Images wider than **Maximum image width** (700 pixels by default) are scaled down to that width in Confluence, close to how Obsidian shows them. To set the width of one image, add it to the embed, such as `![[diagram.png|400]]` or `![Diagram|400](diagram.png)`. The height follows from the image's shape. To set both, use `WIDTHxHEIGHT`, such as `![[diagram.png|400x300]]`. Images in table rows keep their own size, because the `|` before a size would split the table cell. Your notes aren't changed.
 - **Callouts and panels:** Callouts publish as Confluence panels, and pulled panels become callouts. Info, note, warning, and success panels match the callout of the same name, and error panels match `[!failure]`. A callout without a title publishes only its text, because the panel's icon shows its type. A callout with a title publishes the title as the panel's first line. Other callout types publish as info panels or custom panels.
 - **Mermaid and LaTeX:** The plugin renders Mermaid diagrams and LaTeX equations on your computer. When you pull, a Mermaid diagram that you published stays Mermaid code in your note.
 - **Kroki and PlantUML:** Kroki (`kroki-*` code blocks) and PlantUML (`plantuml`, `puml`, and `uml` code blocks) are off by default. When you turn them on, the plugin sends diagram source to the server that you configure. Use a server that you trust, such as a self-hosted instance.

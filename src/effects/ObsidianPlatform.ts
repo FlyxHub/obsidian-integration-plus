@@ -49,7 +49,8 @@ function ObsidianFileSystemLive(app: App): Layer.Layer<EffectFileSystem.FileSyst
 		readFileString: (path) =>
 			Effect.flatMap(find(app, path, "readFileString", TFile), (file) =>
 				Effect.tryPromise({
-					try: () => app.vault.cachedRead(file),
+					// Not cachedRead: the publisher writes this text back with new frontmatter.
+					try: () => app.vault.read(file),
 					catch: (cause) => toPlatformError("readFileString", path, cause),
 				}),
 			),

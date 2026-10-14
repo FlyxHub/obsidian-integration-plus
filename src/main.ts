@@ -38,14 +38,18 @@ import { errorMessage, toError } from "./errors";
 import { PAGE_URL_KEY, PUBLISH_KEY } from "./frontmatterKeys";
 import { sizeImageEmbeds, type ImageSizeLookup } from "./imageEmbeds";
 import { imageSize } from "./imageSize";
-import { krokiFetch } from "./KrokiFetch";
+import { krokiFetch, plantumlFetch } from "./KrokiFetch";
 import { loadMermaidStyles, type MermaidStyles } from "./mermaidStyles";
 import { toVaultPath } from "./paths";
 import { isExcluded, publishFlagFor } from "./publishSelection";
 import { pageUrlsById, restoreSmartLinkUrls } from "./smartLinks";
 import { wikilinksToPageLinks, type PageUrlLookup } from "./wikilinks";
 import { createAttachmentDownloader } from "./sync/attachmentDownload";
-import { createConfluenceRemote, type AttachmentDownload } from "./sync/confluenceRemote";
+import {
+	createConfluenceRemote,
+	type AttachmentDownload,
+	type ConfluenceRemote,
+} from "./sync/confluenceRemote";
 import { MediaSync } from "./sync/media";
 import {
 	createNoteFingerprinter,
@@ -56,11 +60,13 @@ import { notesForPartialPublish, partialWorkspace } from "./sync/partialPublish"
 import { PullService } from "./sync/pull";
 import { PullResultsModal, summarizePull } from "./sync/PullResultsModal";
 import {
+	NEEDS_PULL,
 	checkBeforePublish,
 	findChangedNotes,
 	type NoteFingerprinter,
 	type NoteToPublish,
 } from "./sync/publishGate";
+import { splitFrontmatter } from "./sync/merge";
 import { createSyncStateStore, type SyncStateStore } from "./sync/syncState";
 import {
 	ObsidianPluginSettings,
@@ -319,9 +325,9 @@ export default class ConfluencePlugin extends Plugin {
 			onSubmit: async (values, close) => {
 				const saved = await this.editFrontmatter(file, (frontmatter) => {
 					for (const [property, entry] of Object.entries(values)) {
-						if (!entry.isSet) continue;
 						const { key } = config[property as keyof typeof config];
-						frontmatter[key] = entry.value;
+						if (entry.isSet) frontmatter[key] = entry.value;
+						else delete frontmatter[key];
 					}
 				});
 				if (saved) close();
@@ -395,14 +401,20 @@ export default class ConfluencePlugin extends Plugin {
 						? {
 								importUnder: {
 									rootPageId: settings.confluenceParentId,
-									rootFolder: settings.folderToPublish,
+									// "." publishes the whole vault, whose root folder is "".
+									rootFolder: settings.folderToPublish === "." ? "" : settings.folderToPublish,
 								},
 							}
 						: {}),
 					signal,
 					onProgress: (message) => this.setStatus(message),
 				});
-				if (this.settings.showPublishResultsModal || report.conflicted.length > 0)
+				if (
+					this.settings.showPublishResultsModal ||
+					report.conflicted.length > 0 ||
+					report.noHistory.length > 0 ||
+					report.cancelled
+				)
 					new PullResultsModal(this.app, report).open();
 				else new Notice(summarizePull(report), 10000);
 			} catch (error) {
@@ -435,9 +447,16 @@ export default class ConfluencePlugin extends Plugin {
 		signal: AbortSignal,
 		scope: PublishScope,
 	): Promise<UploadResults | undefined> {
+		const publishFilter = typeof scope === "object" ? scope.note : undefined;
+		const file = publishFilter ? this.app.vault.getFileByPath(publishFilter) : null;
+		if (file && !this.isPublished(file))
+			return {
+				errorMessage: `${file.path} isn't set to publish. Run "Enable publishing for current note" first.`,
+				failedFiles: [],
+				filesUploadResult: [],
+			};
 		const client = await this.authenticationClient();
 		const fingerprint = createNoteFingerprinter(this.app, this.settings);
-		const publishFilter = typeof scope === "object" ? scope.note : undefined;
 		const candidates = await this.notesToPublish(publishFilter);
 		const notes =
 			scope === "changes"
@@ -458,7 +477,8 @@ export default class ConfluencePlugin extends Plugin {
 			? candidates.filter((note) => !partial || partial.has(note.path))
 			: notes;
 
-		const check = await checkBeforePublish(toCheck, createConfluenceRemote(client), this.syncState);
+		const remote = createConfluenceRemote(client);
+		const check = await checkBeforePublish(toCheck, remote, this.syncState, candidates);
 		if (check.blocked.length > 0) {
 			return {
 				errorMessage:
@@ -468,6 +488,8 @@ export default class ConfluencePlugin extends Plugin {
 			};
 		}
 
+		// The text each note had when the publish started, to tell edits made while it runs.
+		const textsBefore = new Map(toCheck.map((note) => [note.path, note.text]));
 		const mermaidStyles = await loadMermaidStyles(this.app, this.settings.mermaidTheme);
 		// A partial publish never overwrites other users' edits on the unchanged folder notes
 		// it includes, and page ordering needs every sibling, so it only runs on full publishes.
@@ -499,18 +521,31 @@ export default class ConfluencePlugin extends Plugin {
 				continue;
 			}
 			// The page was last edited by someone else, but that edit is exactly the version
-			// that was pulled and merged into this note, so it's safe to publish over it. A
-			// partial publish also applies the "Overwrite other users' edits" setting here.
-			const mayOverwrite =
-				check.upToDate.has(path) || (changed !== undefined && this.settings.forceOverwrite);
-			if (editedByOtherUser && mayOverwrite) {
-				signal.throwIfAborted();
-				const forced = this.createPublisher(client, mermaidStyles, { forceOverwrite: true });
-				const retry = (await this.runObsidianEffect(forced.publishEffect(path, { signal }))).find(
-					(entry) => toVaultPath(entry.node.file.absoluteFilePath) === path,
-				);
-				uploaded = retry?.successfulUploadResult;
-				reason = retry?.reason;
+			// that was pulled and merged into this note, so it's safe to publish over it, if no
+			// one saved the page since the check. A partial publish also applies the "Overwrite
+			// other users' edits" setting here.
+			const overwriteBySetting = changed !== undefined && this.settings.forceOverwrite;
+			if (editedByOtherUser && (overwriteBySetting || check.upToDate.has(path))) {
+				const pageId = toCheck.find((note) => note.path === path)?.pageId;
+				try {
+					if (signal.aborted) reason = "Publishing was cancelled before this page was published.";
+					else if (!overwriteBySetting && !(pageId && (await this.stillAtBase(remote, pageId))))
+						reason = NEEDS_PULL;
+					else {
+						const forced = this.createPublisher(client, mermaidStyles, {
+							forceOverwrite: true,
+							...(changed ? { orderPages: false } : {}),
+						});
+						const retry = (
+							await this.runObsidianEffect(forced.publishEffect(path, { signal }), partial)
+						).find((entry) => toVaultPath(entry.node.file.absoluteFilePath) === path);
+						uploaded = retry?.successfulUploadResult;
+						reason = retry?.reason;
+					}
+				} catch (error) {
+					// Keep going, so the pages already published still get their bases recorded.
+					reason = errorMessage(error);
+				}
 			}
 			if (uploaded) uploadResults.filesUploadResult.push(uploaded);
 			else
@@ -525,19 +560,30 @@ export default class ConfluencePlugin extends Plugin {
 				client,
 				[...uploadResults.filesUploadResult, ...treeOnlyUploads],
 				fingerprint,
+				textsBefore,
 			)),
 		);
 		return uploadResults;
 	}
 
+	/** True when the page is still at the version last pulled or published. */
+	private async stillAtBase(remote: ConfluenceRemote, pageId: string): Promise<boolean> {
+		const base = await this.syncState.get(pageId);
+		const current = (await remote.getVersions([pageId])).get(pageId);
+		return base !== undefined && current === base.version;
+	}
+
 	/**
 	 * After publishing, remember what Confluence now holds as the base for the next pull, and
-	 * each note's fingerprint, so the next "Publish changes" skips it until it changes.
+	 * each note's fingerprint, so the next "Publish changes" skips it until it changes. The
+	 * fingerprint is taken after publishing, which writes the page's ID and URL into the note,
+	 * so a note whose body changed while the publish ran gets none and is sent again.
 	 */
 	private async recordPublishedBases(
 		client: ConfluenceClient,
 		uploads: UploadResults["filesUploadResult"],
 		fingerprint: NoteFingerprinter,
+		textsBefore: ReadonlyMap<string, string>,
 	): Promise<UploadResults["failedFiles"]> {
 		const pathsById = new Map<string, string>();
 		const pages = [];
@@ -545,10 +591,16 @@ export default class ConfluencePlugin extends Plugin {
 			if (!adfFile.pageId) continue;
 			const path = toVaultPath(adfFile.absoluteFilePath);
 			pathsById.set(adfFile.pageId, path);
+			const before = textsBefore.get(path);
+			const file = this.app.vault.getFileByPath(path);
+			const unedited =
+				before !== undefined &&
+				file !== null &&
+				splitFrontmatter(await this.app.vault.read(file)).body === splitFrontmatter(before).body;
 			pages.push({
 				pageId: adfFile.pageId,
 				unchanged: contentResult === "same",
-				fingerprint: await fingerprint(path),
+				fingerprint: unedited ? await fingerprint(path) : undefined,
 			});
 		}
 		const failures = await this.createPullService(client).recordPublished(
@@ -608,7 +660,10 @@ export default class ConfluencePlugin extends Plugin {
 			if (settings.plantuml.serverUrl) {
 				plugins.push(
 					new PlantumlRendererPlugin(
-						new HttpPlantumlRenderer({ serverUrl: settings.plantuml.serverUrl }),
+						new HttpPlantumlRenderer({
+							serverUrl: settings.plantuml.serverUrl,
+							fetchImpl: plantumlFetch,
+						}),
 					),
 				);
 			} else {

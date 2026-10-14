@@ -10,7 +10,7 @@ import {
 	type MermaidRenderer,
 } from "@markdown-confluence/lib";
 import { loadMermaid } from "obsidian";
-import type { MermaidStyles, ObsidianMermaid } from "./mermaidStyles";
+import { mermaidSiteConfig, type MermaidStyles, type ObsidianMermaid } from "./mermaidStyles";
 
 /*
  * Renderers for publishing, adapted from `@markdown-confluence/mermaid-electron-renderer`
@@ -57,6 +57,8 @@ export class ElectronMathRenderer implements MathRenderer {
 
 export class ElectronMermaidRenderer implements MermaidRenderer {
 	readonly format: "png" | "svg";
+	/** The publisher renders pages in parallel, but Obsidian's Mermaid has one configuration. */
+	private rendering: Promise<unknown> = Promise.resolve();
 
 	constructor(
 		private readonly styles: MermaidStyles,
@@ -66,12 +68,18 @@ export class ElectronMermaidRenderer implements MermaidRenderer {
 		this.format = renderOptions.format ?? "png";
 	}
 
-	async captureMermaidCharts(charts: ChartData[]): Promise<Map<string, Buffer>> {
+	captureMermaidCharts(charts: ChartData[]): Promise<Map<string, Buffer>> {
+		const result = this.rendering.then(() => this.render(charts));
+		this.rendering = result.catch(() => undefined);
+		return result;
+	}
+
+	private async render(charts: ChartData[]): Promise<Map<string, Buffer>> {
 		const mermaid = (await loadMermaid()) as ObsidianMermaid;
 		const pageUrl = URL.createObjectURL(this.pageBlob());
 		const images = new Map<string, Buffer>();
 		// Obsidian renders notes with this same Mermaid, so put its configuration back after.
-		const obsidianConfig = mermaid.mermaidAPI.getConfig();
+		const obsidianConfig = mermaidSiteConfig(mermaid);
 		try {
 			// Drop theme variables that are CSS functions, which Mermaid can't compute colors from.
 			const themeVariables = Object.fromEntries(
@@ -89,7 +97,13 @@ export class ElectronMermaidRenderer implements MermaidRenderer {
 				suppressErrorRendering: true,
 			});
 			for (const chart of charts) {
-				const window = new BrowserWindow({ width: 800, height: 600, show: false, frame: false });
+				const window = new BrowserWindow({
+					width: 800,
+					height: 600,
+					show: false,
+					frame: false,
+					webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true },
+				});
 				try {
 					await window.loadURL(pageUrl);
 					const id = "mm" + crypto.randomUUID().replace(/-/g, "");
@@ -126,7 +140,11 @@ export class ElectronMermaidRenderer implements MermaidRenderer {
 		}
 	}
 
-	/** The hidden page each diagram is drawn in, styled like the chosen theme. */
+	/**
+	 * The hidden page each diagram is drawn in, styled like the chosen theme. `</style` in theme
+	 * or snippet CSS is written as the equivalent CSS escape `<\/style`, so the CSS can't end
+	 * the style element and add scripts to the page.
+	 */
 	private pageBlob(): Blob {
 		const html = `
 <!DOCTYPE html>
@@ -136,7 +154,7 @@ export class ElectronMermaidRenderer implements MermaidRenderer {
     <title>Mermaid Chart</title>
 	${this.styles.extraStyleSheets.map((sheet) => `<link href="${sheet}" type="text/css" rel="stylesheet"/>`).join("\n")}
 	<style>
-	${this.styles.extraStyles.join("\n")}
+	${this.styles.extraStyles.join("\n").replace(/<\/style/gi, "<\\/style")}
 	</style>
   </head>
   <body class="${this.styles.bodyStyles}">
