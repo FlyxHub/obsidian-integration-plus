@@ -19,7 +19,7 @@ type Captured = { bytes: Uint8Array } | { location: string };
  * (or the bytes, if Confluence answers directly) instead of failing. The file is then
  * fetched from the redirect target without any credentials, and only from Atlassian hosts.
  */
-export function createAttachmentDownloader(baseFetch: ConfluenceFetch) {
+export function createAttachmentDownloader(baseFetch: ConfluenceFetch, signal?: AbortSignal) {
 	const captured = new Map<string, Captured>();
 
 	const fetch: ConfluenceFetch = async (url, init) => {
@@ -51,18 +51,19 @@ export function createAttachmentDownloader(baseFetch: ConfluenceFetch) {
 		const result = key ? captured.get(key) : undefined;
 		if (key) captured.delete(key);
 		if (!result) throw new Error("Confluence didn't return the attachment.");
-		return "bytes" in result ? result.bytes : fetchMedia(result.location);
+		return "bytes" in result ? result.bytes : fetchMedia(result.location, signal);
 	}
 
 	return { fetch, download: downloadAttachment };
 }
 
 /** Follow the media service's redirects without credentials, only to Atlassian hosts. */
-async function fetchMedia(location: string): Promise<Uint8Array> {
+async function fetchMedia(location: string, signal?: AbortSignal): Promise<Uint8Array> {
 	let url = location;
 	for (let hop = 0; hop <= MAX_MEDIA_REDIRECTS; hop++) {
 		assertAtlassianMediaUrl(url);
 		const response = await nodeRequest(url, {
+			signal,
 			maxBytes: MAX_ATTACHMENT_BYTES,
 			idleTimeoutMs: MEDIA_IDLE_TIMEOUT_MS,
 		});

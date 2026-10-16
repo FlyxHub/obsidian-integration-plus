@@ -41,17 +41,13 @@ export function createSyncStateStore(adapter: DataAdapter, directory: string): S
 		return `${directory}/${pageId}.json`;
 	};
 	/**
-	 * Parsed JSON from a file in the directory, or undefined if it's missing. A damaged file
-	 * fails instead: taken as missing, a snapshot would lose the merge base, and the media map
-	 * would be overwritten with only new entries.
+	 * Parsed JSON from a file in the directory, or undefined if it's missing. A damaged or
+	 * unreadable file fails instead: taken as missing, a snapshot would lose the merge base,
+	 * and the media map would be overwritten with only new entries.
 	 */
 	const readJson = async (path: string): Promise<unknown> => {
-		let text: string;
-		try {
-			text = await adapter.read(path);
-		} catch {
-			return undefined;
-		}
+		if (!(await adapter.exists(path))) return undefined;
+		const text = await adapter.read(path);
 		try {
 			return JSON.parse(text) as unknown;
 		} catch {

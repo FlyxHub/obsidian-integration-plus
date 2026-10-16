@@ -71,6 +71,7 @@ import { createSyncStateStore, type SyncStateStore } from "./sync/syncState";
 import {
 	ObsidianPluginSettings,
 	describeSettingsIssue,
+	isRecord,
 	mergeSettings,
 	migrateSecretsToStorage,
 	oauthApiUrl,
@@ -85,6 +86,15 @@ import {
 const LEGACY_PLUGIN_ID = "confluence-integration";
 /** The publisher's error when a page was last edited by someone else. */
 const EDITED_BY_OTHER_USER = "Page last updated by another user";
+/** Settings that name entries in secret storage or sites signed in to; see `readLegacySettings`. */
+const SECRET_REFERENCE_KEYS = [
+	"apiTokenSecretName",
+	"clientSecretSecretName",
+	"oauthSecretId",
+	"oauthClientSecretId",
+	"oauthSites",
+	"oauthSiteId",
+];
 
 type ConfluenceClient = Awaited<ReturnType<ConfluencePlugin["authenticationClient"]>>;
 
@@ -252,11 +262,16 @@ export default class ConfluencePlugin extends Plugin {
 	 */
 	private async readLegacySettings(): Promise<unknown> {
 		const path = normalizePath(`${this.app.vault.configDir}/plugins/${LEGACY_PLUGIN_ID}/data.json`);
+		let data: unknown;
 		try {
-			return JSON.parse(await this.app.vault.adapter.read(path)) as unknown;
+			data = JSON.parse(await this.app.vault.adapter.read(path));
 		} catch {
 			return undefined;
 		}
+		// The original plugin never named secrets or signed-in sites, so such fields in its file
+		// weren't written by it and must not choose which stored secret this plugin sends.
+		if (isRecord(data)) for (const key of SECRET_REFERENCE_KEYS) delete data[key];
+		return data;
 	}
 
 	async saveSettings() {
@@ -389,7 +404,7 @@ export default class ConfluencePlugin extends Plugin {
 		await this.runExclusive(async (signal) => {
 			try {
 				const settings = this.resolvedSettings();
-				const downloader = createAttachmentDownloader(desktopFetch);
+				const downloader = createAttachmentDownloader(desktopFetch, signal);
 				const client = await this.authenticationClient(downloader.fetch);
 				const service = this.createPullService(client, downloader.download);
 				const importNew = settings.importNewPages && !pageIds && settings.confluenceParentId;
@@ -478,7 +493,7 @@ export default class ConfluencePlugin extends Plugin {
 			: notes;
 
 		const remote = createConfluenceRemote(client);
-		const check = await checkBeforePublish(toCheck, remote, this.syncState, candidates);
+		const check = await checkBeforePublish(toCheck, remote, this.syncState, this.linkedNotes());
 		if (check.blocked.length > 0) {
 			return {
 				errorMessage:
@@ -611,6 +626,17 @@ export default class ConfluencePlugin extends Plugin {
 			fileName: pathsById.get(pageId) ?? pageId,
 			reason: `Published, but the pull base could not be saved: ${reason}`,
 		}));
+	}
+
+	/**
+	 * Every note linked to a page, published or not, so that publishing a copied note is
+	 * refused instead of replacing the page of the note it was copied from.
+	 */
+	private linkedNotes(): NoteToPublish[] {
+		return this.app.vault.getMarkdownFiles().flatMap((file) => {
+			const pageId = linkedPageId(this.app, file);
+			return pageId ? [{ path: file.path, pageId, text: "" }] : [];
+		});
 	}
 
 	/** The notes a publish will send, so they can be checked against Confluence first. */

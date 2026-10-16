@@ -23,6 +23,12 @@ interface StoredTokens extends OAuthTokens {
 	configuration: string;
 }
 
+/**
+ * A publish or pull uses the token it starts with, so one that would expire during a long
+ * run is refreshed before the run instead.
+ */
+const REFRESH_AHEAD_MS = 10 * 60 * 1000;
+
 /** Owns desktop browser/device login and rotating credentials for one vault. */
 export class BrowserOAuth {
 	private controller: AbortController | undefined;
@@ -205,7 +211,7 @@ export class BrowserOAuth {
 	async accessToken(): Promise<string> {
 		const stored = this.read();
 		if (!stored) throw new Error("Connect to Atlassian in Confluence settings before publishing.");
-		if (stored.expiresAt > Date.now() + 120000) return stored.accessToken;
+		if (stored.expiresAt > Date.now() + REFRESH_AHEAD_MS) return stored.accessToken;
 		if (this.refreshing) return this.refreshing;
 		const generation = this.generation;
 		const controller = new AbortController();

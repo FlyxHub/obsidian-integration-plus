@@ -64,27 +64,52 @@ function optional(name: string, value: unknown): unknown[] {
 	return empty ? [] : [[name, value]];
 }
 
-/** Dataview results can change without the note changing, so these notes are always sent. */
+/**
+ * Dataview results can change without the note changing, so these notes are always sent.
+ * The publisher runs queries inside quotes, callouts and list items too.
+ */
 export function hasLiveQueries(text: string, settings: ObsidianPluginSettings): boolean {
-	return settings.renderDataview && /^\s*(`{3,}|~{3,})\s*dataview\b/im.test(text);
+	return (
+		settings.renderDataview &&
+		/^[ \t>]*(?:[-+*][ \t]+|\d+[.)][ \t]+)?(`{3,}|~{3,})[ \t]*dataview\b/im.test(text)
+	);
 }
 
-const WIKI_REFERENCE = /(!?)\[\[([^\]|#^]+)[^\]]*\]\]/g;
-const MARKDOWN_EMBED = /!\[[^\]]*\]\(<?([^)\s>]+)>?\)/g;
+/** The address of a Markdown embed after its `](`, read in place; `]` ends it, as `)` does. */
+const EMBED_ADDRESS = /<?([^)\s>\]]+)>?\)/y;
 
 /**
  * Link targets that a note refers to: embeds, which the publisher copies into the page, and
  * wikilinks, which become links to other pages. Web addresses are ignored.
+ *
+ * The text includes code, which a pulled page can fill with anything, so links are found by
+ * searching forward through each line instead of with a pattern that backtracks: a run of
+ * `[[` is read once, not once per `[[`.
  */
 export function noteReferences(text: string): { embeds: string[]; links: string[] } {
 	const embeds = new Set<string>();
 	const links = new Set<string>();
-	for (const [, bang, target] of text.matchAll(WIKI_REFERENCE)) {
-		const name = target!.trim();
-		if (name) (bang ? embeds : links).add(name);
-	}
-	for (const [, target] of text.matchAll(MARKDOWN_EMBED)) {
-		if (!hasUrlScheme(target!)) embeds.add(decodeLink(target!));
+	for (const line of text.split("\n")) {
+		for (let from = 0; ;) {
+			const start = line.indexOf("[[", from);
+			const end = start === -1 ? -1 : line.indexOf("]]", start + 2);
+			if (end === -1) break;
+			const name = line
+				.slice(start + 2, end)
+				.split(/[|#^]/, 1)[0]!
+				.trim();
+			if (name) (line[start - 1] === "!" ? embeds : links).add(name);
+			from = end + 2;
+		}
+		for (let from = 0; ;) {
+			const start = line.indexOf("![", from);
+			const open = start === -1 ? -1 : line.indexOf("](", start + 2);
+			if (open === -1) break;
+			EMBED_ADDRESS.lastIndex = open + 2;
+			const address = EMBED_ADDRESS.exec(line);
+			from = address ? EMBED_ADDRESS.lastIndex : open + 2;
+			if (address && !hasUrlScheme(address[1]!)) embeds.add(decodeLink(address[1]!));
+		}
 	}
 	return { embeds: [...embeds], links: [...links] };
 }

@@ -35,14 +35,19 @@ export async function krokiFetch(
 
 /**
  * The same transport for PlantUML servers. Its requests carry only the encoded diagram, so
- * redirects are followed, as the browser fetch it replaces did.
+ * redirects are followed, as the browser fetch it replaces did, but only within the server's
+ * own host: the image it answers with is uploaded to Confluence, so a redirect must not fetch
+ * it from another address, such as a service on your network.
  */
 export async function plantumlFetch(
 	input: RequestInfo | URL,
 	init: RequestInit = {},
 ): Promise<Response> {
 	let url = input instanceof Request ? input.url : String(input);
+	const host = new URL(url).hostname;
 	for (let hop = 0; hop <= MAX_PLANTUML_REDIRECTS; hop++) {
+		if (new URL(url).hostname !== host)
+			throw new Error("The PlantUML server redirected to another host; that isn't followed.");
 		const response = await nodeRequest(url, {
 			headers: Object.fromEntries(new Headers(init.headers)),
 			signal: init.signal,

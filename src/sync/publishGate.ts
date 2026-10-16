@@ -27,8 +27,8 @@ export const SHARED_PAGE = (other: string) =>
 /**
  * Like `git push`, refuse to publish over Confluence changes that haven't been pulled.
  * Pages with no recorded base keep the publisher's own check, which refuses to overwrite a
- * page that another user edited last. `allNotes` are the other notes that publish, so that
- * two notes linked to one page, as after copying a note, are caught.
+ * page that another user edited last. `allNotes` are the notes linked to pages, published or
+ * not, so that two notes linked to one page, as after copying a note, are caught.
  */
 export async function checkBeforePublish(
 	notes: readonly NoteToPublish[],

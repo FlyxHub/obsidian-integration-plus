@@ -2,6 +2,27 @@
 
 All notable changes to Confluence Integration Plus are listed here. For the history of the plugin this one was forked from, see the [markdown-confluence changelog](https://github.com/markdown-confluence/markdown-confluence/blob/main/CHANGELOG.md).
 
+## 1.2.10 (unreleased)
+
+### Security
+
+- Pulled code blocks are checked by the first word of their language, so a `dataviewjs extra` block becomes `text` like a `dataviewjs` block does. Inline `$=` code is disabled after neighboring code text is joined, so it can't be split to get past the check.
+- An attachment named like a note with a trailing space or dot, such as `payload.md `, is no longer downloaded, because its file name would have been `payload.md`.
+- A page can no longer freeze Obsidian with a heading level in the millions, or with a long run of `[[` in a code block, which "Publish changes" scans for links.
+- A PlantUML server's redirects are followed only within the server's own host, so a redirect can't make the plugin fetch an image from another address and upload it to Confluence.
+- Settings imported from the original Confluence Integration plugin can no longer name which secret in Obsidian secret storage this plugin sends, or which OAuth sites it has signed in to.
+
+### Fixed
+
+- Publishing refuses a note whose `connie-page-id` another note in the vault also has, including notes outside the publish folder and "Publish current note", instead of replacing the other note's page. Pulling skips such pages with a message instead of merging into whichever note comes first.
+- A media file ID named like a built-in object member, such as `constructor`, no longer makes its page impossible to pull.
+- Browser sign-in refreshes an access token that has less than ten minutes left before a publish or pull, so a long run doesn't fail partway when the token expires.
+- Cancelling a pull also stops an attachment download that is in progress.
+- A sync snapshot that can't be read is reported instead of being treated as missing, which could discard the merge base or the map of downloaded images.
+- An import that fails while creating its note no longer leaves a temporary file behind.
+- Notes with a Dataview query inside a callout, quote or list item always publish, as notes with a top-level query do.
+- Confluence API responses are limited to 100 MB.
+
 ## 1.2.9 (2026-10-14)
 
 ### Security
