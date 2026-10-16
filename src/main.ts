@@ -36,6 +36,7 @@ import { ElectronMathRenderer, ElectronMermaidRenderer } from "./electronRendere
 import { ObsidianPlatformLive } from "./effects/ObsidianPlatform";
 import { errorMessage, toError } from "./errors";
 import { PAGE_URL_KEY, PUBLISH_KEY } from "./frontmatterKeys";
+import { keepHostedMedia } from "./hostedMedia";
 import { sizeImageEmbeds, type ImageSizeLookup } from "./imageEmbeds";
 import { imageSize } from "./imageSize";
 import { krokiFetch, plantumlFetch } from "./KrokiFetch";
@@ -662,6 +663,7 @@ export default class ConfluencePlugin extends Plugin {
 		const mermaidRenderer = new ElectronMermaidRenderer(mermaidStyles, settings.mermaid);
 
 		const plugins: ADFProcessingPlugin<unknown, unknown>[] = [
+			keepHostedMedia(),
 			new MathRendererPlugin(new ElectronMathRenderer()),
 			new MermaidRendererPlugin(mermaidRenderer),
 			restoreSmartLinkUrls(

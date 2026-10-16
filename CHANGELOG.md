@@ -14,6 +14,7 @@ All notable changes to Confluence Integration Plus are listed here. For the hist
 
 ### Fixed
 
+- Publishing a pulled note that keeps Confluence-hosted images in `adf` blocks no longer fails with "Cannot read properties of undefined (reading 'split')". Those images stay on the page as they are.
 - Publishing refuses a note whose `connie-page-id` another note in the vault also has, including notes outside the publish folder and "Publish current note", instead of replacing the other note's page. Pulling skips such pages with a message instead of merging into whichever note comes first.
 - A media file ID named like a built-in object member, such as `constructor`, no longer makes its page impossible to pull.
 - Browser sign-in refreshes an access token that has less than ten minutes left before a publish or pull, so a long run doesn't fail partway when the token expires.
