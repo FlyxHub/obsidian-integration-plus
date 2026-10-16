@@ -90,15 +90,22 @@ export function createObsidianPullVault(
 		await app.vault.createFolder(path);
 	};
 
+	const notesByPage = () => {
+		const notes = new Map<string, string[]>();
+		for (const file of app.vault.getMarkdownFiles()) {
+			const pageId = linkedPageId(app, file);
+			if (pageId) notes.set(pageId, [...(notes.get(pageId) ?? []), file.path]);
+		}
+		return notes;
+	};
+
 	return {
-		linkedNotes() {
-			const notes = new Map<string, string>();
-			for (const file of app.vault.getMarkdownFiles()) {
-				const pageId = linkedPageId(app, file);
-				if (pageId && !notes.has(pageId)) notes.set(pageId, file.path);
-			}
-			return notes;
-		},
+		linkedNotes: () => new Map([...notesByPage()].map(([pageId, paths]) => [pageId, paths[0]!])),
+
+		duplicateLinks: () =>
+			[...notesByPage()]
+				.filter(([, paths]) => paths.length > 1)
+				.map(([pageId, paths]) => ({ pageId, paths })),
 
 		notePaths: () => app.vault.getMarkdownFiles().map((file) => file.path),
 
@@ -141,8 +148,14 @@ export function createObsidianPullVault(
 			// Pulled content is written under another extension and then renamed, so plugins that
 			// run commands in new notes, such as Templater, never run it.
 			const file = await app.vault.create(`${notePath}.${crypto.randomUUID()}.tmp`, text);
-			await app.vault.rename(file, notePath);
-			await assignFrontmatter(file, frontmatter);
+			try {
+				await app.vault.rename(file, notePath);
+				await assignFrontmatter(file, frontmatter);
+			} catch (error) {
+				// Don't leave a half-made note behind; the page is imported again next time.
+				await app.fileManager.trashFile(file).catch(() => undefined);
+				throw error;
+			}
 		},
 	};
 }

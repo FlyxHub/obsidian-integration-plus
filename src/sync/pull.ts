@@ -18,8 +18,10 @@ import type { SyncStateStore } from "./syncState";
 
 /** Vault operations pull needs; implemented with the Obsidian API in main.ts. */
 export interface PullVault {
-	/** Page ID → vault path, for every note with `connie-page-id`. */
+	/** Page ID → vault path, for every note with `connie-page-id`; the first note per page. */
 	linkedNotes(): Map<string, string>;
+	/** Pages that more than one note is linked to, such as after copying a note. */
+	duplicateLinks?(): { pageId: string; paths: string[] }[];
 	/** Paths of every Markdown note in the vault, to choose link text like Obsidian does. */
 	notePaths(): string[];
 	read(path: string): Promise<string>;
@@ -142,6 +144,15 @@ export class PullService {
 		};
 		const linked = this.vault.linkedNotes();
 		const pathsById = new Map(linked);
+		// A page with two notes can't be merged into either; its base would advance for both.
+		for (const { pageId, paths } of this.vault.duplicateLinks?.() ?? []) {
+			linked.delete(pageId);
+			for (const path of paths)
+				report.skipped.push({
+					name: path,
+					reason: `${paths.find((other) => other !== path)} is linked to the same Confluence page. Remove ${PAGE_ID_KEY} from the copy, then pull again.`,
+				});
+		}
 		// Plan imports before converting anything, so every pulled or imported note can link
 		// to pages imported in this same pull.
 		const planned =

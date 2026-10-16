@@ -79,7 +79,7 @@ export class MediaSync {
 		return (fileId) => {
 			const diagram = this.diagrams.get(fileId);
 			if (diagram) return diagram;
-			const path = map[fileId];
+			const path = ownPath(map, fileId);
 			return path && !opensAsNote(path) && this.vault.exists(path)
 				? `![[${linkText(path)}]]`
 				: undefined;
@@ -103,7 +103,7 @@ export class MediaSync {
 		const errors: string[] = [];
 		let changed = false;
 		for (const { fileId, pageId } of mediaReferences(adf)) {
-			const known = map[fileId];
+			const known = ownPath(map, fileId);
 			const isLocal = !!known && this.vault.exists(known);
 			if ((isLocal && diagrams.size === 0) || !pageId) continue;
 			try {
@@ -124,14 +124,15 @@ export class MediaSync {
 					continue;
 				}
 				if (!options.download) continue;
-				if (opensAsNote(attachment.title)) {
+				// Checked on the path that is written, not the title: `note.md ` loses its space.
+				const path = await this.availablePath(attachment.title, attachment.id);
+				if (opensAsNote(path)) {
 					errors.push(
 						`${attachment.title} wasn't downloaded, because Obsidian could open it as a note.`,
 					);
 					continue;
 				}
 				const data = await this.remote.downloadAttachment(pageId, attachment.id);
-				const path = await this.availablePath(attachment.title, attachment.id);
 				await this.vault.writeBinary(path, data);
 				this.files = undefined;
 				map[fileId] = path;
@@ -196,6 +197,11 @@ export class MediaSync {
 			path = joinPath(this.folder, `${name} ${copy}${extension}`);
 		return path;
 	}
+}
+
+/** The map's own entry for a file ID; IDs come from pages, so `constructor` must not hit Object's. */
+function ownPath(map: Record<string, string>, fileId: string): string | undefined {
+	return Object.hasOwn(map, fileId) ? map[fileId] : undefined;
 }
 
 /** Attachment titles come from the server: strip path characters and odd extensions. */

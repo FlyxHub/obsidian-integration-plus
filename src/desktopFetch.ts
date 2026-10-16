@@ -1,6 +1,9 @@
 import type { ConfluenceFetch } from "@markdown-confluence/lib";
 import { isRedirect, nodeRequest } from "./nodeRequest";
 
+/** Largest API response kept in memory; attachment downloads don't come through here. */
+const MAX_RESPONSE_BYTES = 100 * 1024 * 1024;
+
 /** Desktop HTTPS transport: bypass browser CORS, preserve aborts, never follow redirects. */
 export const desktopFetch: ConfluenceFetch = async (url, init) => {
 	if (new URL(url).protocol !== "https:") throw new Error("Confluence requests require HTTPS");
@@ -11,6 +14,7 @@ export const desktopFetch: ConfluenceFetch = async (url, init) => {
 		headers: Object.fromEntries(serialized.headers),
 		body: init.body == null ? undefined : Buffer.from(await serialized.arrayBuffer()),
 		signal: init.signal,
+		maxBytes: MAX_RESPONSE_BYTES,
 	});
 	if (isRedirect(response.status)) throw new Error("Confluence redirects are not permitted");
 	const text = response.body.toString("utf8");

@@ -40,7 +40,8 @@ export function adfToMergeMarkdown(
 	confluenceBaseUrl: string,
 	media: MediaResolver = () => undefined,
 ): string {
-	const document = tidyText(neutralizeExecutableAdf(readAdfDocument(input))) as {
+	// Tidy first: it joins neighboring code text, so `$` + `= ...` can't hide from the check.
+	const document = sanitizeAdf(tidyText(readAdfDocument(input))) as {
 		content?: unknown[];
 	};
 	return joinBlocks(document.content ?? [], confluenceBaseUrl, media) + "\n";
@@ -69,8 +70,10 @@ function joinBlocks(content: unknown[], confluenceBaseUrl: string, media: MediaR
  * 9: blocks readable that Markdown can represent once compared like the publisher writes
  *    them: smart links to pages in personal spaces (`/spaces/~...`), bold or italic text
  *    with a space at an end, marks in another order, and line breaks at a paragraph's start.
+ * 10: code languages checked by their first word, inline `$=` checked after code text is
+ *    joined, and heading levels kept within 1 to 6.
  */
-export const MERGE_FORMAT = 9;
+export const MERGE_FORMAT = 10;
 
 /** The first format that neutralizes code in the ADF; see `neutralizeLegacyBase`. */
 const ADF_NEUTRALIZED_FORMAT = 8;
@@ -110,7 +113,7 @@ function panelToCallout(
 	media: MediaResolver,
 ): string | undefined {
 	const { panelType, ...otherAttrs } = stripPresentation({ attrs: panel.attrs }).attrs ?? {};
-	const calloutType = PANEL_CALLOUTS[String(panelType)];
+	const calloutType = ownValue(PANEL_CALLOUTS, String(panelType));
 	if (!calloutType || Object.keys(otherAttrs).length > 0) return undefined;
 	const inner = joinBlocks(panel.content ?? [], confluenceBaseUrl, media);
 	if (inner === "") return undefined;
@@ -142,7 +145,13 @@ function mediaEmbeds(block: AdfNode, media: MediaResolver): string | undefined {
 
 /** True when publishing the Markdown recreates the block, ignoring editor-only attributes. */
 function publishesAs(markdown: string, block: AdfNode, confluenceBaseUrl: string): boolean {
-	const published = parseMarkdownToADF(normalizeCalloutsForPublish(markdown), confluenceBaseUrl);
+	let published;
+	try {
+		published = parseMarkdownToADF(normalizeCalloutsForPublish(markdown), confluenceBaseUrl);
+	} catch {
+		// Markdown the publisher's parser can't read certainly doesn't publish as the block.
+		return false;
+	}
 	return sameContent(published.content ?? [], [block]);
 }
 
@@ -167,19 +176,28 @@ const INLINE_JS = /^(\s*)\$=/;
  * Make pulled content inert, wherever it is in the page: executable code blocks become plain
  * `text` blocks, and Dataview inline JavaScript (`` `$= ...` ``) gets a space so it no longer
  * runs. Notes you wrote keep their own blocks, because the merge keeps local text that
- * Confluence didn't change.
+ * Confluence didn't change. Heading levels are also kept within 1 to 6, because the lib
+ * writes `#` as many times as the level says, and a page can say any number.
  */
-function neutralizeExecutableAdf(node: unknown): unknown {
-	if (Array.isArray(node)) return node.map(neutralizeExecutableAdf);
+function sanitizeAdf(node: unknown): unknown {
+	if (Array.isArray(node)) return node.map(sanitizeAdf);
 	if (!isNode(node)) return node;
 	const result: AdfNode & { text?: unknown; marks?: unknown } = { ...node };
 	const language = node.attrs?.["language"];
+	// Obsidian and Markdown take the first word of a fence's info string as its language.
 	if (
 		node.type === "codeBlock" &&
 		typeof language === "string" &&
-		EXECUTABLE_LANGUAGES.has(language.toLowerCase())
+		EXECUTABLE_LANGUAGES.has(language.trim().split(/\s+/)[0]!.toLowerCase())
 	)
 		result.attrs = { ...node.attrs, language: "text" };
+	if (node.type === "heading") {
+		const level = Number(node.attrs?.["level"]);
+		result.attrs = {
+			...node.attrs,
+			level: Number.isInteger(level) ? Math.min(Math.max(level, 1), 6) : 1,
+		};
+	}
 	if (
 		node.type === "text" &&
 		typeof result.text === "string" &&
@@ -187,8 +205,13 @@ function neutralizeExecutableAdf(node: unknown): unknown {
 		result.marks.some((mark) => (mark as { type?: unknown })?.type === "code")
 	)
 		result.text = result.text.replace(INLINE_JS, "$1$ =");
-	if (node.content) result.content = node.content.map(neutralizeExecutableAdf);
+	if (node.content) result.content = node.content.map(sanitizeAdf);
 	return result;
+}
+
+/** A table lookup that ignores inherited names such as `constructor`; keys come from pages. */
+function ownValue<T>(table: Record<string, T>, key: string): T | undefined {
+	return Object.hasOwn(table, key) ? table[key] : undefined;
 }
 
 /**
@@ -225,7 +248,7 @@ function stripPresentation<T>(value: T): T {
 		if (key === "attrs" && child && typeof child === "object" && !Array.isArray(child)) {
 			const attrs: Record<string, unknown> = {};
 			for (const [name, attr] of Object.entries(child as Record<string, unknown>)) {
-				if (!PRESENTATION_ATTRS[name]?.(attr)) attrs[name] = stripPresentation(attr);
+				if (!ownValue(PRESENTATION_ATTRS, name)?.(attr)) attrs[name] = stripPresentation(attr);
 			}
 			if (Object.keys(attrs).length > 0) result[key] = sortKeys(attrs);
 			continue;

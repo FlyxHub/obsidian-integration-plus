@@ -773,6 +773,58 @@ test("doesn't import over a note whose name differs only in case", async () => {
 	expect(files["Docs/new page.md"]).toBe("Mine.\n");
 });
 
+test("doesn't download attachments whose file name would open as a note", async () => {
+	const pageAdf = {
+		type: "doc",
+		version: 1,
+		content: ["payload.md ", "note.canvas.", "noext"].map((_title, index) => ({
+			type: "mediaSingle",
+			content: [
+				{ type: "media", attrs: { collection: "contentId-40", id: `file-${index}`, type: "file" } },
+			],
+		})),
+	};
+	const binaries: Record<string, Uint8Array> = {};
+	const mediaVault = {
+		filePaths: () => Object.keys(binaries),
+		exists: (path: string) => path in binaries,
+		pathInUse: async (path: string) => path in binaries,
+		readBinary: async () => new Uint8Array(),
+		writeBinary: async (path: string, data: Uint8Array) => void (binaries[path] = data),
+	};
+	const mediaRemote = {
+		listAttachments: async () =>
+			["payload.md ", "note.canvas.", "noext"].map((title, index) => ({
+				id: `att-${index}`,
+				title,
+				fileId: `file-${index}`,
+			})),
+		downloadAttachment: async () => new Uint8Array([1]),
+	};
+	const { store } = fakeState();
+	const sync = new MediaSync(mediaRemote, mediaVault, store, "images");
+	const errors = await sync.ensure(pageAdf, { download: true, diagrams: new Map() });
+	expect(binaries).toEqual({});
+	expect(errors).toHaveLength(3);
+	for (const error of errors) expect(error).toContain("could open it as a note");
+});
+
+test("pages that two notes are linked to are skipped with both notes named", async () => {
+	const note = '---\nconnie-page-id: "1"\n---\nText.\n';
+	const { vault, files } = fakeVault({ "A.md": note, "Copy of A.md": note });
+	vault.duplicateLinks = () => [{ pageId: "1", paths: ["A.md", "Copy of A.md"] }];
+	const { store } = fakeState([base("1", "Text.\n", 1)]);
+	const remote = fakeRemote([page("1", "Text, edited.\n", 2)]);
+	const report = await new PullService(remote, vault, store, NO_MEDIA).pull(OPTIONS);
+	expect(files["A.md"]).toBe(note);
+	expect(files["Copy of A.md"]).toBe(note);
+	expect(report.updated).toEqual([]);
+	expect(report.skipped).toEqual([
+		{ name: "A.md", reason: expect.stringContaining("Copy of A.md is linked to the same") },
+		{ name: "Copy of A.md", reason: expect.stringContaining("A.md is linked to the same") },
+	]);
+});
+
 test("a new version with the same content leaves the note untouched", async () => {
 	const note = '---\nconnie-page-id: "1"\n---\nText.\n\n';
 	const { vault, files } = fakeVault({ "A.md": note });

@@ -137,6 +137,48 @@ test("makes executable code inert wherever it is on the page", () => {
 	expect(example).toContain("```dataviewjs\nx\n```");
 });
 
+test("checks code languages by their first word, and inline code after it's joined", () => {
+	const code = (language: string) => ({
+		type: "codeBlock",
+		attrs: { language },
+		content: [text("dv.paragraph(1)")],
+	});
+	const inline = (...parts: string[]) => ({
+		type: "paragraph",
+		content: parts.map((part) => ({ type: "text", text: part, marks: [{ type: "code" }] })),
+	});
+	const markdown = adfToMergeMarkdown(
+		doc(
+			code("dataviewjs extra"),
+			code("js-engine\tx"),
+			inline("$", "= dv.current()"),
+			inline("$=", " dv.pages()"),
+		),
+		BASE_URL,
+	);
+	expect(markdown).not.toMatch(/dataview|js-engine/i);
+	expect(markdown).not.toMatch(/`\s*\$=/);
+	expect(markdown.match(/```text/g)).toHaveLength(2);
+	expect(markdown).toContain("`$ = dv.current()`");
+});
+
+test("keeps heading levels within bounds and ignores attribute names built-in objects have", () => {
+	const heading = (level: unknown) => ({ type: "heading", attrs: { level }, content: [text("T")] });
+	expect(adfToMergeMarkdown(doc(heading(100000000), heading("x"), heading(0)), BASE_URL)).toBe(
+		"###### T\n\n# T\n\n# T\n",
+	);
+	const odd = adfToMergeMarkdown(
+		doc(paragraph("x", { constructor: 1 }), {
+			type: "panel",
+			attrs: { panelType: "constructor" },
+			content: [paragraph("hi")],
+		}),
+		BASE_URL,
+	);
+	expect(odd).not.toContain("native code");
+	expect(odd).toContain('"panelType": "constructor"');
+});
+
 test("neutralizes executable fences in snapshots from before the ADF was neutralized", () => {
 	const old =
 		"> ```dataviewjs\nx\n> ```\n\n- ~~~ DataviewJS\n\n```dataview\nLIST\n```\n\n` $= x`\n";

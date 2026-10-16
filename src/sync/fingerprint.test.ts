@@ -40,11 +40,27 @@ test("finds embeds and wikilinks, ignoring headings, aliases and web images", ()
 	});
 });
 
+test("reads long runs of unclosed links, as pulled code can hold, in linear time", () => {
+	const text = `\`\`\`text\n${"[[a".repeat(20000)}\n${"[[a]b".repeat(20000)}\n${"![a](b".repeat(20000)}\n\`\`\`\n`;
+	const started = performance.now();
+	expect(noteReferences(text)).toEqual({ embeds: [], links: [] });
+	expect(performance.now() - started).toBeLessThan(500);
+	expect(noteReferences("[[a]] ![[b.png]] ![c](d.png) [[e|f]]")).toEqual({
+		embeds: ["b.png", "d.png"],
+		links: ["a", "e"],
+	});
+});
+
 test("notes with Dataview queries always count as changed while Dataview publishing is on", () => {
 	const text = "```dataview\nLIST\n```\n";
 	expect(hasLiveQueries(text, { ...settings, renderDataview: true })).toBe(true);
 	expect(hasLiveQueries(text, { ...settings, renderDataview: false })).toBe(false);
 	expect(hasLiveQueries("```js\n```\n", { ...settings, renderDataview: true })).toBe(false);
+	// The publisher also runs queries in callouts, quotes and list items.
+	const live = { ...settings, renderDataview: true };
+	expect(hasLiveQueries("> [!info]\n> ```dataview\n> LIST\n> ```\n", live)).toBe(true);
+	expect(hasLiveQueries("- item\n  ~~~dataview\n  LIST\n  ~~~\n", live)).toBe(true);
+	expect(hasLiveQueries("```dataviewjs\n```\n", live)).toBe(false);
 });
 
 test("settings added to the key later change it only when they're set", () => {

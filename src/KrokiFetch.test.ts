@@ -43,6 +43,13 @@ test("PlantUML transport follows redirects and stalled diagram requests end", as
 			response.end();
 			return;
 		}
+		if (request.url === "/elsewhere/png/x") {
+			response.writeHead(302, {
+				location: `http://localhost:${request.headers.host?.split(":")[1]}/png/x`,
+			});
+			response.end();
+			return;
+		}
 		if (request.url === "/stall") {
 			response.writeHead(200);
 			response.write("partial");
@@ -62,6 +69,8 @@ test("PlantUML transport follows redirects and stalled diagram requests end", as
 		await expect(
 			nodeRequest(`${base}/stall`, { allowHttp: true, idleTimeoutMs: 50 }),
 		).rejects.toThrow("stopped responding");
+		// A redirect may change the path or scheme, but not the host.
+		await expect(plantumlFetch(`${base}/elsewhere/png/x`)).rejects.toThrow("another host");
 	} finally {
 		server.closeAllConnections();
 		await new Promise<void>((resolve) => server.close(() => resolve()));
