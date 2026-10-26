@@ -51,6 +51,7 @@ import {
 	type AttachmentDownload,
 	type ConfluenceRemote,
 } from "./sync/confluenceRemote";
+import { independentNotes, publishKeepingParents } from "./sync/keepParentPublish";
 import { MediaSync } from "./sync/media";
 import {
 	createNoteFingerprinter,
@@ -551,6 +552,12 @@ export default class ConfluencePlugin extends Plugin {
 			? notesForPartialPublish(
 					candidates.map((note) => note.path),
 					[...changed],
+					independentNotes(
+						candidates.map((note) => {
+							const file = this.app.vault.getFileByPath(note.path);
+							return { path: note.path, frontmatter: file ? (this.frontmatter(file) ?? {}) : {} };
+						}),
+					),
 				)
 			: undefined;
 		const partial = selection ? new Set(selection) : undefined;
@@ -580,7 +587,7 @@ export default class ConfluencePlugin extends Plugin {
 			changed ? { forceOverwrite: false, orderPages: false } : {},
 		);
 		const results = await this.runObsidianEffect(
-			publisher.publishEffect(publishFilter, { signal }),
+			publishKeepingParents(publisher, publishFilter, { signal }),
 			partial,
 		);
 
@@ -618,7 +625,7 @@ export default class ConfluencePlugin extends Plugin {
 							...(changed ? { orderPages: false } : {}),
 						});
 						const retry = (
-							await this.runObsidianEffect(forced.publishEffect(path, { signal }), partial)
+							await this.runObsidianEffect(publishKeepingParents(forced, path, { signal }), partial)
 						).find((entry) => toVaultPath(entry.node.file.absoluteFilePath) === path);
 						uploaded = retry?.successfulUploadResult;
 						reason = retry?.reason;

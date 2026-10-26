@@ -73,3 +73,31 @@ test("the partial workspace hands the lib only the selected notes, in their orde
 		"/Docs/Guides/Setup.md",
 	]);
 });
+
+test("a changed independent note doesn't pull obsolete folder notes into the publish", () => {
+	const path = "Docs/Team/Deep/Page.md";
+	expect(notesForPartialPublish(vault, [path], new Set([path]))).toEqual([path]);
+});
+
+test("mixed partial publishes retain the folder notes needed by ordinary changed notes", () => {
+	const independent = "Docs/Team/Deep/Page.md";
+	const selected = notesForPartialPublish(
+		vault,
+		[independent, "Docs/Guides/Setup.md"],
+		new Set([independent]),
+	);
+	expect(selected).toContain("Docs/Docs.md");
+	expect(selected).toContain(independent);
+	expect(selected).toContain("Docs/Guides/Setup.md");
+	expect(selected).not.toContain("Docs/Team/Deep/index.md");
+	expect(selected).not.toContain("Docs/Team/Team.md");
+	expect(treeRoot(selected!)).toBe("Docs");
+});
+
+test("an independent root anchor doesn't include its obsolete folder note", () => {
+	const independent = "Docs/PI20/Sprint.md";
+	const files = [independent, "Docs/PI20/PI20.md", "Docs/Guides/Setup.md"];
+	const selected = notesForPartialPublish(files, ["Docs/Guides/Setup.md"], new Set([independent]));
+	expect(selected).toEqual(["Docs/Guides/Setup.md", independent]);
+	expect(treeRoot(selected!)).toBe("Docs");
+});

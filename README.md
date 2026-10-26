@@ -224,7 +224,7 @@ Two notes can't publish to the same page. If you copy a published note, the copy
 
 ### Page hierarchy
 
-The parent page is the root of the published tree, and each folder becomes a page. To give a folder page its own content, add a folder note named after the folder, or named `index.md`, `README.md`, or `readme.md`.
+The parent page is the root of the published tree, and each folder becomes a page. Linked notes with `connie-dont-change-parent-page: true` keep their existing Confluence parent and do not create local ancestor pages just to publish themselves. Folder notes still supply ancestor pages when other notes below them need the folder hierarchy. To give a folder page its own content, add a folder note named after the folder, or named `index.md`, `README.md`, or `readme.md`.
 
 ## Pull changes from Confluence
 
