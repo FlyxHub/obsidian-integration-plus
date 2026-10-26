@@ -2,6 +2,13 @@
 
 All notable changes to Confluence Integration Plus are listed here. For the history of the plugin this one was forked from, see the [markdown-confluence changelog](https://github.com/markdown-confluence/markdown-confluence/blob/main/CHANGELOG.md).
 
+## 1.2.11 (unreleased)
+
+### Added
+
+- **Import Confluence page** creates a note from a page URL or ID in a folder you choose, downloads images, and records a sync snapshot so pulling and publishing work immediately. Imported notes enable publishing and preserve the existing Confluence parent. Existing paths and duplicate page links are rejected.
+- **Pull current note (overwrite local content)** replaces a linked note's body with the Confluence version without merging or confirmation. It preserves frontmatter, updates the page title, and records a fresh sync snapshot. Edits made while the download runs prevent the overwrite.
+
 ## 1.2.10 (2026-10-16)
 
 ### Security
