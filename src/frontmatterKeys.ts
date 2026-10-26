@@ -10,3 +10,6 @@ export const PAGE_TITLE_KEY = config.pageTitle.key;
 export const PAGE_URL_KEY = config.pageUrl.key;
 /** `connie-publish`: publish a note that folder or tag rules don't select, or skip one. */
 export const PUBLISH_KEY = config.publish.key;
+
+/** `connie-dont-change-parent-page`: keep the page under its existing Confluence parent. */
+export const KEEP_PARENT_KEY = config.dontChangeParentPageId.key;

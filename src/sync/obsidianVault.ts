@@ -76,7 +76,7 @@ export function createObsidianPullVault(
 		return file;
 	};
 
-	const assignFrontmatter = (file: TFile, values: Record<string, string>) =>
+	const assignFrontmatter = (file: TFile, values: Record<string, string | boolean>) =>
 		app.fileManager.processFrontMatter(file, (frontmatter: Record<string, unknown>) => {
 			Object.assign(frontmatter, values);
 		});
