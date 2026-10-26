@@ -50,7 +50,22 @@ export function publishKeepingParents(
 ) {
 	return Effect.gen(function* () {
 		const workspace = yield* MarkdownWorkspaceService;
-		const files = yield* workspace.getMarkdownFilesToUpload;
+		const available = yield* workspace.getMarkdownFilesToUpload;
+		const current = filter
+			? available.find((file) => toVaultPath(file.absoluteFilePath) === toVaultPath(filter))
+			: undefined;
+		// The library filters uploads only after resolving the entire tree. For a linked
+		// keep-parent current note, unrelated siblings must not enter that tree at all.
+		// Classify it alone: even a folder note needs no children for this command.
+		const standalone =
+			current &&
+			independentNotes([
+				{
+					path: toVaultPath(current.absoluteFilePath),
+					frontmatter: current.frontmatter,
+				},
+			]).size > 0;
+		const files = standalone ? [current] : available;
 		const independent = independentNotes(
 			files.map((file) => ({
 				path: toVaultPath(file.absoluteFilePath),

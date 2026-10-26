@@ -197,3 +197,45 @@ test("mixed publishes keep an existing folder note as parent of ordinary child p
 	expect(updates.find((update) => update["id"] === "124")?.["ancestors"]).toEqual([{ id: "123" }]);
 	expect(updates.find((update) => update["id"] === "123")).not.toHaveProperty("ancestors");
 });
+
+test.each(["Node Shell.md", "Fires.md"])(
+	"current-note publish of %s ignores ordinary siblings and unrelated folder pages",
+	async (name) => {
+		const path = `/Delivery/Fires/${name}`;
+		const note = file(path, {
+			Status: "Open",
+			Priority: "1",
+			"connie-publish": true,
+			"connie-page-id": "7514652806",
+			"connie-dont-change-parent-page": true,
+			"connie-title": "Node Shell",
+			"connie-frontmatter-to-publish": ["Status", "Priority"],
+		});
+		const { run, lookups, writes, updates } = fixture([
+			file("/Delivery/Other.md", { "connie-page-id": "124" }),
+			// No explicit publish flag: the configured folder rules can still include it.
+			file("/Delivery/Fires/Other fire.md"),
+			file("/Delivery/Unrelated/Unrelated note.md"),
+			note,
+		]);
+		if (name === "Node Shell.md") {
+			const original = fixture([
+				file("/Delivery/Other.md", { "connie-page-id": "124" }),
+				file("/Delivery/Fires/Other fire.md"),
+				note,
+			]);
+			await expect(original.run(path, false)).rejects.toThrow(
+				"Fires is trying to overwrite a page outside the page tree",
+			);
+		}
+		const results = await run(path);
+		expect(results).toHaveLength(1);
+		expect(results[0]?.reason).toBeUndefined();
+		expect(results[0]?.successfulUploadResult?.adfFile.absoluteFilePath).toBe(path);
+		expect(lookups).toEqual([]);
+		expect(writes).toEqual([path]);
+		expect(updates).toHaveLength(1);
+		expect(updates[0]).toMatchObject({ id: "7514652806", title: "Node Shell" });
+		expect(updates[0]).not.toHaveProperty("ancestors");
+	},
+);

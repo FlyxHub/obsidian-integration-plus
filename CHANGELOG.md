@@ -11,6 +11,7 @@ All notable changes to Confluence Integration Plus are listed here. For the hist
 
 ### Fixed
 
+- **Publish current note** now isolates a linked keep-parent note before resolving its page tree, so other publishable notes in the same local folder or elsewhere cannot trigger unrelated ancestor-page errors.
 - Publishing a linked note with `connie-dont-change-parent-page: true` no longer resolves or creates its local ancestor pages when they aren't needed by other notes. Folder notes needed by ordinary child notes still supply their hierarchy.
 
 ## 1.2.10 (2026-10-16)
