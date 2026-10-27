@@ -2,6 +2,12 @@
 
 All notable changes to Confluence Integration Plus are listed here. For the history of the plugin this one was forked from, see the [markdown-confluence changelog](https://github.com/markdown-confluence/markdown-confluence/blob/main/CHANGELOG.md).
 
+## 1.2.11 (unreleased)
+
+### Security
+
+- A note or a pulled page with many unclosed HTML comments, or with long multiline link reference definitions, can no longer freeze Obsidian while it's converted. The plugin now uses markdown-it 14.3.3, which parses them in linear time.
+
 ## 1.2.10 (2026-10-16)
 
 ### Security
