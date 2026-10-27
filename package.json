@@ -41,10 +41,11 @@
 		"prettier": "^3.6.0",
 		"typescript": "^5.9.0",
 		"typescript-eslint": "^8.35.1",
-		"vitest": "4.1.11"
+		"vitest": "4.1.12"
 	},
 	"overrides": {
 		"@effect/platform-node-shared": "4.0.0-rc.112",
+		"moment": "2.31.0",
 		"prosemirror-view": "1.42.6"
 	},
 	"repository": {
