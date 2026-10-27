@@ -224,7 +224,7 @@ Two notes can't publish to the same page. If you copy a published note, the copy
 
 ### Page hierarchy
 
-The parent page is the root of the published tree, and each folder becomes a page. To give a folder page its own content, add a folder note named after the folder, or named `index.md`, `README.md`, or `readme.md`.
+The parent page is the root of the published tree, and each folder becomes a page. Linked notes with `connie-dont-change-parent-page: true` keep their existing Confluence parent and do not create local ancestor pages just to publish themselves. Folder notes still supply ancestor pages when other notes below them need the folder hierarchy. To give a folder page its own content, add a folder note named after the folder, or named `index.md`, `README.md`, or `readme.md`.
 
 ## Pull changes from Confluence
 
@@ -238,6 +238,9 @@ To pull, do one of the following:
 
 - To pull every note that's linked to a page, click **Pull from Confluence** (the cloud download icon) in the ribbon, or run **Pull all notes**.
 - To pull only the active note, run **Pull current note**.
+- To replace the active linked note's body with the Confluence version, run **Pull current note (overwrite local content)**. This command discards local body edits and conflict markers immediately, without merging or a confirmation prompt. It keeps the note's frontmatter, updates `connie-title` from Confluence, and records a fresh sync snapshot. Edits made while the page is downloading cause the overwrite to stop instead of losing those edits.
+
+To import a single existing Confluence page, run **Import Confluence page** and enter its numeric page ID or full page URL. The destination defaults to the active note's folder, or the vault root if no note is open; you can change it before importing. The plugin creates missing folders, converts the page content and downloads its images, then opens the new note. It refuses to overwrite an existing path or import a page already linked to another note. The imported note has `connie-publish: true` and `connie-dont-change-parent-page: true`, so publishing is enabled and the existing Confluence parent is preserved. Excluded folders still prevent publishing. It also starts with a sync snapshot, so **Pull current note** and **Publish current note** work immediately.
 
 When the pull finishes, a dialog lists the notes that were updated, imported, or have conflicts. If a note has conflicts, the dialog opens even when **Show results after publishing** is off.
 

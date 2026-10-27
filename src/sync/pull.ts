@@ -1,5 +1,5 @@
 import { errorMessage } from "../errors";
-import { PAGE_ID_KEY, PAGE_TITLE_KEY } from "../frontmatterKeys";
+import { KEEP_PARENT_KEY, PAGE_ID_KEY, PAGE_TITLE_KEY, PUBLISH_KEY } from "../frontmatterKeys";
 import { joinPath, parentOf } from "../paths";
 import { MERGE_FORMAT, adfToMergeMarkdown, neutralizeLegacyBase } from "./adfMarkdown";
 import type { ConfluenceRemote, RemoteChild, RemotePage } from "./confluenceRemote";
@@ -32,7 +32,7 @@ export interface PullVault {
 	/** True when a file or folder has this path, ignoring case where the file system does. */
 	pathInUse(path: string): Promise<boolean>;
 	/** Create a note, and any missing parent folders. */
-	create(path: string, body: string, frontmatter: Record<string, string>): Promise<void>;
+	create(path: string, body: string, frontmatter: Record<string, string | boolean>): Promise<void>;
 	/** The note's current fingerprint, or undefined when it must always be published. */
 	fingerprint(path: string): Promise<string | undefined>;
 }
@@ -46,10 +46,26 @@ export interface SiteUrls {
 export interface PullOptions extends SiteUrls {
 	/** Pull only these page IDs; all linked notes when undefined. */
 	pageIds?: readonly string[];
+	/** Discard local body edits instead of merging; used by explicit overwrite commands. */
+	overwrite?: boolean;
 	/** Import pages under this root page that have no note yet. */
 	importUnder?: { rootPageId: string; rootFolder: string };
 	signal?: AbortSignal;
 	onProgress?: (message: string) => void;
+}
+
+export interface ImportPageOptions extends SiteUrls {
+	pageId: string;
+	folder: string;
+	signal?: AbortSignal;
+	onProgress?: (message: string) => void;
+}
+
+export interface ImportPageResult {
+	path: string;
+	title: string;
+	/** Images that could not be downloaded; their ADF is preserved in the note. */
+	warnings: string[];
 }
 
 export interface PullReport {
@@ -116,7 +132,7 @@ export function convertPage(
 interface PlannedImport {
 	page: RemotePage;
 	path: string;
-	frontmatter: Record<string, string>;
+	frontmatter: Record<string, string | boolean>;
 }
 
 const MAX_DEPTH = 50;
@@ -130,6 +146,56 @@ export class PullService {
 		private readonly state: SyncStateStore,
 		private readonly media: Pick<MediaSync, "ensure" | "resolver">,
 	) {}
+
+	/**
+	 * Import the remote body before recording its base. Pulling into a blank linked note
+	 * would leave it blank when the current user was the page's last editor.
+	 */
+	async importPage(options: ImportPageOptions): Promise<ImportPageResult> {
+		options.signal?.throwIfAborted();
+		options.onProgress?.(`Fetching page ${options.pageId}`);
+		const page = await this.remote.getPage(options.pageId);
+		options.signal?.throwIfAborted();
+		if (!page)
+			throw new Error(`Confluence page ${options.pageId} was not found or is inaccessible.`);
+		// Reject duplicates and occupied paths before conversion can download any attachments.
+		const linked = this.vault.linkedNotes();
+		const existing = linked.get(page.id);
+		if (existing) throw new Error(`Confluence page ${page.id} is already linked to ${existing}.`);
+
+		const name = toNoteName(page.title, page.id);
+		const path = joinPath(options.folder, `${name}.md`);
+		if (await this.vault.pathInUse(path))
+			throw new Error(
+				`A file or folder already exists at ${path}. Choose another destination folder.`,
+			);
+		// Imported pages can publish from the chosen folder without moving their remote parent.
+		const frontmatter: Record<string, string | boolean> = {
+			[PAGE_ID_KEY]: page.id,
+			[PUBLISH_KEY]: true,
+			[KEEP_PARENT_KEY]: true,
+		};
+		// Preserve the remote title only when filename sanitizing changed it.
+		if (name !== page.title) frontmatter[PAGE_TITLE_KEY] = page.title;
+		// Include the planned note so links from the page to itself become local wikilinks.
+		linked.set(page.id, path);
+		const resolve = createPageLinkResolver(linked, [...this.vault.notePaths(), path]);
+		const warnings: string[] = [];
+		options.onProgress?.(`Importing ${path}`);
+		await this.writeImport(
+			{ page, path, frontmatter },
+			options,
+			resolve,
+			(error) => warnings.push(`An image wasn't downloaded: ${error}`),
+			options.signal,
+		);
+		return { path, title: page.title, warnings };
+	}
+
+	/** Replace one linked note with its remote body, bypassing merge and first-pull rules. */
+	async overwritePage(options: Omit<ImportPageOptions, "folder">): Promise<PullReport> {
+		return this.pull({ ...options, pageIds: [options.pageId], overwrite: true });
+	}
 
 	async pull(options: PullOptions): Promise<PullReport> {
 		const report: PullReport = {
@@ -182,15 +248,12 @@ export class PullService {
 			if (options.signal?.aborted) return { ...report, cancelled: true };
 			options.onProgress?.(`Importing ${path}`);
 			try {
-				const converted = await this.convert(
-					page,
+				await this.writeImport(
+					{ page, path, frontmatter },
 					options,
 					resolve,
-					[],
 					this.imageSkipped(report, path),
 				);
-				await this.vault.create(path, converted.markdown, frontmatter);
-				await this.recordBase(page, converted, await this.vault.fingerprint(path));
 				report.imported.push(path);
 			} catch (error) {
 				report.skipped.push({ name: page.title, reason: errorMessage(error) });
@@ -244,7 +307,7 @@ export class PullService {
 		report: PullReport,
 	) {
 		const local = await this.vault.read(path);
-		if (hasConflictMarkers(local)) {
+		if (!options.overwrite && hasConflictMarkers(local)) {
 			report.skipped.push({
 				name: path,
 				reason: "Resolve the conflict markers in this note first.",
@@ -258,7 +321,7 @@ export class PullService {
 			base?.format === MERGE_FORMAT &&
 			!base.unresolvedLinks.some((id) => resolve(id)) &&
 			base.unresolvedMedia.length === 0;
-		if (base && current && remoteVersion === base.version) {
+		if (!options.overwrite && base && current && remoteVersion === base.version) {
 			report.unchanged++;
 			return;
 		}
@@ -267,7 +330,7 @@ export class PullService {
 			report.deleted.push(path);
 			return;
 		}
-		if (base && current && page.version === base.version) {
+		if (!options.overwrite && base && current && page.version === base.version) {
 			report.unchanged++;
 			return;
 		}
@@ -281,10 +344,20 @@ export class PullService {
 			page,
 			options,
 			resolve,
-			[local, base?.markdown ?? ""],
+			options.overwrite ? [] : [local, base?.markdown ?? ""],
 			this.imageSkipped(report, path),
 		);
 		const { frontmatter, body } = splitFrontmatter(local);
+		if (options.overwrite) {
+			// Ignore both local edits and the old baseline, including existing conflict markers.
+			// Keep the optimistic write check so edits made during the request aren't lost.
+			options.signal?.throwIfAborted();
+			await this.vault.replace(path, local, frontmatter + remote.markdown);
+			await this.vault.setFrontmatter(path, { [PAGE_TITLE_KEY]: page.title });
+			await this.recordBase(page, remote, await this.vault.fingerprint(path));
+			report.updated.push(path);
+			return;
+		}
 		let merged;
 		if (base) {
 			merged = mergeThreeWay(
@@ -417,6 +490,23 @@ export class PullService {
 			folder: children.length > 0 ? childFolder : undefined,
 			planned: { page, path, frontmatter },
 		};
+	}
+
+	/** Bulk and single-page imports share conversion, media handling, and base recording. */
+	private async writeImport(
+		{ page, path, frontmatter }: PlannedImport,
+		urls: SiteUrls,
+		resolve: PageLinkResolver,
+		onImageError: (error: string) => void,
+		signal?: AbortSignal,
+	) {
+		signal?.throwIfAborted();
+		const converted = await this.convert(page, urls, resolve, [], onImageError);
+		// Cancellation may arrive during a download; stop before creating the note.
+		signal?.throwIfAborted();
+		await this.vault.create(path, converted.markdown, frontmatter);
+		// Fingerprint the finished note, including frontmatter, so it starts in sync.
+		await this.recordBase(page, converted, await this.vault.fingerprint(path));
 	}
 
 	/**

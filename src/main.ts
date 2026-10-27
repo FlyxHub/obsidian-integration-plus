@@ -41,7 +41,7 @@ import { sizeImageEmbeds, type ImageSizeLookup } from "./imageEmbeds";
 import { imageSize } from "./imageSize";
 import { krokiFetch, plantumlFetch } from "./KrokiFetch";
 import { loadMermaidStyles, type MermaidStyles } from "./mermaidStyles";
-import { toVaultPath } from "./paths";
+import { parentOf, toVaultPath } from "./paths";
 import { isExcluded, publishFlagFor } from "./publishSelection";
 import { pageUrlsById, restoreSmartLinkUrls } from "./smartLinks";
 import { wikilinksToPageLinks, type PageUrlLookup } from "./wikilinks";
@@ -51,6 +51,7 @@ import {
 	type AttachmentDownload,
 	type ConfluenceRemote,
 } from "./sync/confluenceRemote";
+import { independentNotes, publishKeepingParents } from "./sync/keepParentPublish";
 import { MediaSync } from "./sync/media";
 import {
 	createNoteFingerprinter,
@@ -58,6 +59,7 @@ import {
 	linkedPageId,
 } from "./sync/obsidianVault";
 import { notesForPartialPublish, partialWorkspace } from "./sync/partialPublish";
+import { ImportPageModal } from "./sync/ImportPageModal";
 import { PullService } from "./sync/pull";
 import { PullResultsModal, summarizePull } from "./sync/PullResultsModal";
 import {
@@ -139,6 +141,12 @@ export default class ConfluencePlugin extends Plugin {
 		});
 
 		this.addCommand({
+			id: "import-confluence-page",
+			name: "Import Confluence page",
+			callback: () => this.importConfluencePage(),
+		});
+
+		this.addCommand({
 			id: "pull-current",
 			name: "Pull current note",
 			checkCallback: (checking) => {
@@ -146,6 +154,18 @@ export default class ConfluencePlugin extends Plugin {
 				const pageId = file ? linkedPageId(this.app, file) : undefined;
 				if (!pageId) return false;
 				if (!checking) void this.runPull([pageId]);
+				return true;
+			},
+		});
+
+		this.addCommand({
+			id: "pull-current-overwrite",
+			name: "Pull current note (overwrite local content)",
+			checkCallback: (checking) => {
+				const file = this.app.workspace.getActiveViewOfType(MarkdownView)?.file;
+				const pageId = file ? linkedPageId(this.app, file) : undefined;
+				if (!pageId) return false;
+				if (!checking) void this.runPull([pageId], true);
 				return true;
 			},
 		});
@@ -374,7 +394,7 @@ export default class ConfluencePlugin extends Plugin {
 	/** Run one publish or pull at a time, with cancellation and status bar progress. */
 	private async runExclusive(task: (signal: AbortSignal) => Promise<void>): Promise<void> {
 		if (this.syncAbort) {
-			new Notice("A Confluence publish or pull is already in progress.");
+			new Notice("A Confluence publish, pull, or import is already in progress.");
 			return;
 		}
 		this.syncAbort = new AbortController();
@@ -401,7 +421,49 @@ export default class ConfluencePlugin extends Plugin {
 		return new PullService(remote, vault, this.syncState, media);
 	}
 
-	private async runPull(pageIds?: string[]): Promise<void> {
+	/** Capture the destination when the dialog opens, then acquire the sync lock on submit. */
+	private importConfluencePage(): void {
+		const activePath = this.app.workspace.getActiveViewOfType(MarkdownView)?.file?.path;
+		new ImportPageModal(
+			this.app,
+			activePath ? parentOf(activePath) : "",
+			async (pageId, folder) => {
+				await this.runExclusive(async (signal) => {
+					let importedPath: string | undefined;
+					try {
+						this.setStatus("Connecting to Confluence");
+						const settings = this.resolvedSettings();
+						const downloader = createAttachmentDownloader(desktopFetch, signal);
+						const client = await this.authenticationClient(downloader.fetch);
+						const result = await this.createPullService(client, downloader.download).importPage({
+							pageId,
+							folder,
+							confluenceBaseUrl: settings.confluenceBaseUrl,
+							confluenceSiteUrl: settings.confluenceSiteUrl,
+							signal,
+							onProgress: (message) => this.setStatus(message),
+						});
+						// An opening failure must still tell the user that the note was created.
+						importedPath = result.path;
+						await this.app.workspace.openLinkText(result.path, "");
+						new Notice(`Imported ${result.title}.`);
+						if (result.warnings.length > 0) new Notice(result.warnings.join("\n"), 10000);
+					} catch (error) {
+						new Notice(
+							importedPath
+								? `Imported ${importedPath}, but could not open it: ${errorMessage(error)}`
+								: signal.aborted
+									? "Import cancelled."
+									: `Import failed: ${errorMessage(error)}`,
+							10000,
+						);
+					}
+				});
+			},
+		).open();
+	}
+
+	private async runPull(pageIds?: string[], overwrite = false): Promise<void> {
 		await this.runExclusive(async (signal) => {
 			try {
 				const settings = this.resolvedSettings();
@@ -409,7 +471,7 @@ export default class ConfluencePlugin extends Plugin {
 				const client = await this.authenticationClient(downloader.fetch);
 				const service = this.createPullService(client, downloader.download);
 				const importNew = settings.importNewPages && !pageIds && settings.confluenceParentId;
-				const report = await service.pull({
+				const options = {
 					confluenceBaseUrl: settings.confluenceBaseUrl,
 					confluenceSiteUrl: settings.confluenceSiteUrl,
 					...(pageIds ? { pageIds } : {}),
@@ -423,8 +485,12 @@ export default class ConfluencePlugin extends Plugin {
 							}
 						: {}),
 					signal,
-					onProgress: (message) => this.setStatus(message),
-				});
+					onProgress: (message: string) => this.setStatus(message),
+				};
+				const report =
+					overwrite && pageIds?.[0]
+						? await service.overwritePage({ ...options, pageId: pageIds[0] })
+						: await service.pull(options);
 				if (
 					this.settings.showPublishResultsModal ||
 					report.conflicted.length > 0 ||
@@ -486,6 +552,12 @@ export default class ConfluencePlugin extends Plugin {
 			? notesForPartialPublish(
 					candidates.map((note) => note.path),
 					[...changed],
+					independentNotes(
+						candidates.map((note) => {
+							const file = this.app.vault.getFileByPath(note.path);
+							return { path: note.path, frontmatter: file ? (this.frontmatter(file) ?? {}) : {} };
+						}),
+					),
 				)
 			: undefined;
 		const partial = selection ? new Set(selection) : undefined;
@@ -515,7 +587,7 @@ export default class ConfluencePlugin extends Plugin {
 			changed ? { forceOverwrite: false, orderPages: false } : {},
 		);
 		const results = await this.runObsidianEffect(
-			publisher.publishEffect(publishFilter, { signal }),
+			publishKeepingParents(publisher, publishFilter, { signal }),
 			partial,
 		);
 
@@ -553,7 +625,7 @@ export default class ConfluencePlugin extends Plugin {
 							...(changed ? { orderPages: false } : {}),
 						});
 						const retry = (
-							await this.runObsidianEffect(forced.publishEffect(path, { signal }), partial)
+							await this.runObsidianEffect(publishKeepingParents(forced, path, { signal }), partial)
 						).find((entry) => toVaultPath(entry.node.file.absoluteFilePath) === path);
 						uploaded = retry?.successfulUploadResult;
 						reason = retry?.reason;
