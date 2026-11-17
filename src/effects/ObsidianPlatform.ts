@@ -23,11 +23,7 @@ export function ObsidianPlatformLive(app: App) {
 const ObsidianPathLive: Layer.Layer<EffectPath.Path> = Layer.effect(EffectPath.Path)(
 	Effect.map(Effect.provide(EffectPath.Path, EffectPath.layer), (path): EffectPath.Path => ({
 		...path,
-		resolve: (...pathSegments) => {
-			const pathText = pathSegments.filter((segment) => segment.length > 0).join("/");
-			const rootedPath = pathText.startsWith("/") ? pathText : `/${pathText}`;
-			return path.normalize(rootedPath);
-		},
+		resolve: (...pathSegments) => path.resolve("/", ...pathSegments),
 	})),
 );
 
@@ -35,6 +31,11 @@ function ObsidianFileSystemLive(app: App): Layer.Layer<EffectFileSystem.FileSyst
 	return EffectFileSystem.layerNoop({
 		access: (path) => Effect.asVoid(find(app, path, "access", TAbstractFile)),
 		exists: (path) => Effect.sync(() => getAbstractFile(app, path) !== null),
+		// The lib's content-root check. Vault paths only: following symlinks would need Node's fs.
+		realPath: (path) =>
+			Effect.map(find(app, path, "realPath", TAbstractFile), (file) =>
+				file.path === "/" ? "/" : `/${file.path}`,
+			),
 		readDirectory: (path) =>
 			Effect.map(find(app, path, "readDirectory", TFolder), (folder) =>
 				folder.children.map((child) => child.name),

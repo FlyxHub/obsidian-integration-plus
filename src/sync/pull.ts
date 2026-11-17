@@ -48,6 +48,8 @@ export interface PullOptions extends SiteUrls {
 	pageIds?: readonly string[];
 	/** Import pages under this root page that have no note yet. */
 	importUnder?: { rootPageId: string; rootFolder: string };
+	/** Resolve conflicts by taking Confluence's lines instead of writing conflict markers. */
+	preferConfluence?: boolean;
 	signal?: AbortSignal;
 	onProgress?: (message: string) => void;
 }
@@ -55,6 +57,8 @@ export interface PullOptions extends SiteUrls {
 export interface PullReport {
 	updated: string[];
 	conflicted: string[];
+	/** Notes where Confluence's lines replaced conflicting lines of the note (`preferConfluence`). */
+	overwritten: string[];
 	imported: string[];
 	renamed: { path: string; title: string }[];
 	deleted: string[];
@@ -135,6 +139,7 @@ export class PullService {
 		const report: PullReport = {
 			updated: [],
 			conflicted: [],
+			overwritten: [],
 			imported: [],
 			renamed: [],
 			deleted: [],
@@ -291,6 +296,7 @@ export class PullService {
 				body,
 				neutralizeLegacyBase(base.markdown, base.format),
 				remote.markdown,
+				options.preferConfluence,
 			);
 		} else if (page.authorId === (await this.currentAccountId())) {
 			// Published before pull existed and not edited by anyone else since: Confluence
@@ -301,7 +307,7 @@ export class PullService {
 			report.unchanged++;
 			return;
 		} else {
-			merged = mergeTwoWay(body, remote.markdown);
+			merged = mergeTwoWay(body, remote.markdown, options.preferConfluence);
 		}
 
 		// Only rewrite the note when a line changed, not just its trailing blank lines.
@@ -319,6 +325,7 @@ export class PullService {
 		);
 
 		if (merged.conflicts > 0) report.conflicted.push(path);
+		else if (merged.overwritten > 0) report.overwritten.push(path);
 		else if (changed) report.updated.push(path);
 		else report.unchanged++;
 	}

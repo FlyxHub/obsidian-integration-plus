@@ -5,6 +5,7 @@ import { MERGE_FORMAT, adfToMergeMarkdown, neutralizeLegacyBase, sameContent } f
 
 const BASE_URL = "https://example.atlassian.net";
 const text = (value: string) => ({ type: "text", text: value });
+const strong = (value: string) => ({ ...text(value), marks: [{ type: "strong" }] });
 const paragraph = (value: string, attrs?: Record<string, unknown>) => ({
 	type: "paragraph",
 	...(attrs ? { attrs } : {}),
@@ -82,6 +83,39 @@ test("keeps Confluence-only content as an adf fence", () => {
 	expect(markdown.startsWith("```adf")).toBe(true);
 	expect(markdown).toContain('"color": "green"');
 	expect(markdown).not.toContain("localId");
+});
+
+test("keeps lists with screenshots in their items readable, with an embed under each item", () => {
+	const image = (id: string) => ({
+		type: "mediaSingle",
+		attrs: { widthType: "pixel" },
+		content: [{ type: "media", attrs: { type: "file", id, collection: "contentId-1" } }],
+	});
+	const item = (...content: unknown[]) => ({ type: "listItem", content });
+	const steps = (order: number) => ({
+		type: "orderedList",
+		attrs: { order },
+		content: [
+			item({ type: "paragraph", content: [text("Click "), strong("Next"), text(".")] }),
+			item(paragraph("Close the window."), image("a"), paragraph("Wait.")),
+		],
+	});
+	const files: Record<string, string> = { a: "![[setup.png]]" };
+	const resolve = (id: string) => files[id];
+
+	expect(adfToMergeMarkdown(doc(steps(9)), BASE_URL, resolve)).toBe(
+		"9. Click **Next**.\n10. Close the window.\n\n    ![[setup.png]]\n\n    Wait.\n",
+	);
+	// The publisher puts an image on its own line under an item back inside that item.
+	const published = parseMarkdownToADF(
+		"1. Close the window.\n\n   ![](file://setup.png)\n",
+		BASE_URL,
+	);
+	expect(JSON.stringify(published)).toMatch(
+		/"listItem","content":\[\{"type":"paragraph".*"type":"mediaSingle"/,
+	);
+	// An image that isn't in the vault keeps the whole list as a fence.
+	expect(adfToMergeMarkdown(doc(steps(1)), BASE_URL).startsWith("```adf")).toBe(true);
 });
 
 test("round-trips Markdown produced by the publisher", () => {

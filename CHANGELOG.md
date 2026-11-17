@@ -2,6 +2,27 @@
 
 All notable changes to Confluence Integration Plus are listed here. For the history of the plugin this one was forked from, see the [markdown-confluence changelog](https://github.com/markdown-confluence/markdown-confluence/blob/main/CHANGELOG.md).
 
+## 1.3.0 (unreleased)
+
+### Added
+
+- **Prefer Confluence on pull conflicts** setting. When it's on, a pull takes Confluence's version of any block that changed both in Obsidian and in Confluence, instead of adding conflict markers. Your changes to other blocks are kept, and the pull results list the notes where your version was replaced. It's off by default.
+
+### Security
+
+- The plugin now uses version 7.0.1 of the markdown-confluence library, which includes these security fixes:
+  - Note embeds have limits on count, nesting depth, and size, so a note can't make a publish run out of memory or freeze Obsidian.
+  - Matching existing inline comments to the new page content has limits, so a large page can't freeze Obsidian. Comments that can't be placed are kept under **Inline comments that couldn't be mapped**.
+- Mermaid diagrams are drawn in a window that can't make network or file requests, and a diagram that refers to an image, link, font, or style outside itself isn't published. Published SVG diagrams therefore can't load anything when someone opens them. Obsidian's own styles are copied into the window, not loaded from the app.
+
+### Changed
+
+- Mermaid diagrams with `click` links, `href` links, or images no longer publish. Remove the link or image to publish the diagram.
+
+### Fixed
+
+- Pulled lists with images in their items, such as numbered steps with screenshots, become readable Markdown lists with each image embedded under its step. Before, the whole list became an `adf` code block. Your next pull converts these lists in notes you've already pulled.
+
 ## 1.2.12 (2026-11-17)
 
 ### Fixed

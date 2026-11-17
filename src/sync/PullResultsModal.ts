@@ -28,6 +28,13 @@ export class PullResultsModal extends Modal {
 			});
 			list(contentEl, report.conflicted);
 		}
+		if (report.overwritten.length > 0) {
+			contentEl.createEl("h4", { text: "Confluence's version kept" });
+			contentEl.createEl("p", {
+				text: "In these notes, lines that you and someone in Confluence both changed now have Confluence's text. Your other changes were kept. To get your lines back, use the file recovery core plugin or your vault's version history.",
+			});
+			list(contentEl, report.overwritten);
+		}
 		section(contentEl, "Updated from Confluence", report.updated);
 		section(contentEl, "Imported", report.imported);
 		section(
@@ -59,6 +66,9 @@ export function summarizePull(report: PullReport): string {
 	const parts = [
 		`${report.updated.length} updated`,
 		`${report.conflicted.length} with conflicts`,
+		...(report.overwritten.length > 0
+			? [`${report.overwritten.length} with Confluence's version kept`]
+			: []),
 		`${report.imported.length} imported`,
 		`${report.unchanged} unchanged`,
 	];

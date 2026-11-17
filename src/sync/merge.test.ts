@@ -11,12 +11,12 @@ const base = "# Plan\n\nIntro.\n\nMiddle.\n\nOutro.\n";
 
 test("applies a Confluence-only change", () => {
 	const remote = base.replace("Outro.", "Outro, edited in Confluence.");
-	expect(mergeThreeWay(base, base, remote)).toEqual({ text: remote, conflicts: 0 });
+	expect(mergeThreeWay(base, base, remote)).toEqual({ text: remote, conflicts: 0, overwritten: 0 });
 });
 
 test("keeps a local-only change", () => {
 	const local = base.replace("Intro.", "Intro, edited in Obsidian.");
-	expect(mergeThreeWay(local, base, base)).toEqual({ text: local, conflicts: 0 });
+	expect(mergeThreeWay(local, base, base)).toEqual({ text: local, conflicts: 0, overwritten: 0 });
 });
 
 test("combines changes to different blocks", () => {
@@ -25,6 +25,7 @@ test("combines changes to different blocks", () => {
 	expect(mergeThreeWay(local, base, remote)).toEqual({
 		text: "# Plan\n\nLocal intro.\n\nMiddle.\n\nRemote outro.\n",
 		conflicts: 0,
+		overwritten: 0,
 	});
 });
 
@@ -49,9 +50,24 @@ test("marks overlapping changes as conflicts", () => {
 	expect(hasConflictMarkers(merged.text)).toBe(true);
 });
 
+test("with preferRemote, takes Confluence's lines for conflicts and keeps other local changes", () => {
+	const local = base.replace("Intro.", "Local intro.").replace("Middle.", "Local middle.");
+	const remote = base.replace("Middle.", "Remote middle.");
+	expect(mergeThreeWay(local, base, remote, true)).toEqual({
+		text: "# Plan\n\nLocal intro.\n\nRemote middle.\n\nOutro.\n",
+		conflicts: 0,
+		overwritten: 1,
+	});
+	expect(mergeTwoWay("A\n\nB\n", "A\n\nC\n", true)).toEqual({
+		text: "A\n\nC\n",
+		conflicts: 0,
+		overwritten: 1,
+	});
+});
+
 test("treats identical changes on both sides as no conflict", () => {
 	const both = base.replace("Middle.", "Same fix.");
-	expect(mergeThreeWay(both, base, both)).toEqual({ text: both, conflicts: 0 });
+	expect(mergeThreeWay(both, base, both)).toEqual({ text: both, conflicts: 0, overwritten: 0 });
 });
 
 test("two-way merge marks every difference and applies nothing", () => {
@@ -61,7 +77,7 @@ test("two-way merge marks every difference and applies nothing", () => {
 });
 
 test("two-way merge of identical text is a no-op", () => {
-	expect(mergeTwoWay("A\n", "A\n")).toEqual({ text: "A\n", conflicts: 0 });
+	expect(mergeTwoWay("A\n", "A\n")).toEqual({ text: "A\n", conflicts: 0, overwritten: 0 });
 });
 
 test("splits frontmatter and normalizes line endings", () => {

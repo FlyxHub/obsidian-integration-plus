@@ -72,8 +72,9 @@ function joinBlocks(content: unknown[], confluenceBaseUrl: string, media: MediaR
  *    with a space at an end, marks in another order, and line breaks at a paragraph's start.
  * 10: code languages checked by their first word, inline `$=` checked after code text is
  *    joined, and heading levels kept within 1 to 6.
+ * 11: lists with images or files in their items readable, with embeds under each item.
  */
-export const MERGE_FORMAT = 10;
+export const MERGE_FORMAT = 11;
 
 /** The first format that neutralizes code in the ADF; see `neutralizeLegacyBase`. */
 const ADF_NEUTRALIZED_FORMAT = 8;
@@ -90,7 +91,7 @@ const PANEL_CALLOUTS: Record<string, string> = {
 function blockToMarkdown(block: AdfNode, confluenceBaseUrl: string, media: MediaResolver): string {
 	// Confluence adds empty paragraphs, often at the end of a page; they carry no content.
 	if (block.type === "paragraph" && trimLineBreaks(block.content ?? []).length === 0) return "";
-	const embeds = mediaEmbeds(block, media);
+	const embeds = mediaEmbeds(block, media) ?? listWithMedia(block, confluenceBaseUrl, media);
 	if (embeds) return embeds;
 	if (block.type === "panel") {
 		const callout = panelToCallout(block, confluenceBaseUrl, media);
@@ -141,6 +142,69 @@ function mediaEmbeds(block: AdfNode, media: MediaResolver): string | undefined {
 			: undefined;
 	});
 	return embeds.every((embed) => embed !== undefined) ? embeds.join("\n") : undefined;
+}
+
+/**
+ * A list whose items hold images or files, such as numbered steps with screenshots, with each
+ * embed on its own line under its item. The lib's conversion runs an item's blocks together,
+ * so each item's blocks are converted here and separated by blank lines. The embeds skip the
+ * round-trip check like `mediaEmbeds`; the rest of the list is checked with a placeholder
+ * paragraph in place of each embed. Returns undefined unless every embed resolves and the
+ * rest of the list publishes back the same.
+ */
+function listWithMedia(
+	list: AdfNode,
+	confluenceBaseUrl: string,
+	media: MediaResolver,
+): string | undefined {
+	const ordered = list.type === "orderedList";
+	if (!ordered && list.type !== "bulletList") return undefined;
+	const items = (list.content ?? []).filter(isNode);
+	const isMedia = (block: AdfNode) => block.type === "mediaSingle" || block.type === "mediaGroup";
+	if (!items.some((item) => (item.content ?? []).filter(isNode).some(isMedia))) return undefined;
+	const start = ordered ? (list.attrs?.["order"] ?? 1) : 1;
+	if (typeof start !== "number" || !Number.isSafeInteger(start) || start < 0) return undefined;
+
+	const checkedItems: AdfNode[] = [];
+	const checkedMarkdown: string[] = [];
+	const markdown: string[] = [];
+	for (const [index, item] of items.entries()) {
+		const blocks: AdfNode[] = [];
+		const checkedParts: string[] = [];
+		const parts: string[] = [];
+		for (const block of (item.content ?? []).filter(isNode)) {
+			if (isMedia(block)) {
+				const embed = mediaEmbeds(block, media);
+				if (embed === undefined) return undefined;
+				const placeholder = "MEDIAPLACEHOLDER";
+				blocks.push({ type: "paragraph", content: [{ type: "text", text: placeholder }] });
+				checkedParts.push(placeholder);
+				parts.push(embed);
+			} else {
+				const readable = convertADFToMarkdown(asDocument(block), { lossless: false }).trim();
+				blocks.push(block);
+				checkedParts.push(readable);
+				parts.push(readable);
+			}
+		}
+		checkedItems.push({ ...item, content: blocks });
+		const marker = ordered ? `${start + index}. ` : "- ";
+		const indent = " ".repeat(marker.length);
+		// Continuation lines go under the item's text; blank lines stay empty.
+		const asItem = (blockMarkdown: string[]) =>
+			marker +
+			blockMarkdown
+				.join("\n\n")
+				.split("\n")
+				.map((line, at) => (at === 0 || !line ? line : indent + line))
+				.join("\n");
+		checkedMarkdown.push(asItem(checkedParts));
+		markdown.push(asItem(parts));
+	}
+	const checked = { ...list, content: checkedItems };
+	return publishesAs(checkedMarkdown.join("\n"), checked, confluenceBaseUrl)
+		? markdown.join("\n")
+		: undefined;
 }
 
 /** True when publishing the Markdown recreates the block, ignoring editor-only attributes. */

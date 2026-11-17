@@ -8,7 +8,10 @@ const END = `>>>>>>> ${REMOTE_LABEL}`;
 
 export interface MergeOutcome {
 	text: string;
+	/** Conflicts written with markers. */
 	conflicts: number;
+	/** Conflicts resolved by taking Confluence's lines, with `preferRemote`. */
+	overwritten: number;
 }
 
 export interface SplitNote {
@@ -29,41 +32,67 @@ export function splitFrontmatter(text: string): SplitNote {
  * Three-way merge of a note body with the Confluence version, like `git merge`.
  * `base` is the Confluence content at the last publish or pull, in the same Markdown form
  * as `remote`. Changes on only one side are applied; overlapping changes get Git-style
- * conflict markers.
+ * conflict markers, or with `preferRemote` take Confluence's lines.
  */
-export function mergeThreeWay(local: string, base: string, remote: string): MergeOutcome {
+export function mergeThreeWay(
+	local: string,
+	base: string,
+	remote: string,
+	preferRemote = false,
+): MergeOutcome {
 	const regions = diff3Merge(lines(local), lines(base), lines(remote), {
 		excludeFalseConflicts: true,
 	});
-	const output: string[] = [];
-	let conflicts = 0;
+	const merge = new ConflictWriter(preferRemote);
 	for (const region of regions) {
-		if (region.ok) output.push(...region.ok);
-		else if (region.conflict) {
-			conflicts++;
-			output.push(START, ...region.conflict.a, MIDDLE, ...region.conflict.b, END);
-		}
+		if (region.ok) merge.output.push(...region.ok);
+		else if (region.conflict) merge.conflict(region.conflict.a, region.conflict.b);
 	}
-	return { text: joinLines(output), conflicts };
+	return merge.outcome();
 }
 
 /**
  * Two-way comparison for notes with no recorded base. Nothing is applied automatically:
- * every difference becomes a conflict for the user to resolve.
+ * every difference becomes a conflict for the user to resolve, or with `preferRemote`
+ * takes Confluence's lines.
  */
-export function mergeTwoWay(local: string, remote: string): MergeOutcome {
-	const output: string[] = [];
-	let conflicts = 0;
+export function mergeTwoWay(local: string, remote: string, preferRemote = false): MergeOutcome {
+	const merge = new ConflictWriter(preferRemote);
 	for (const part of diffComm(lines(local), lines(remote))) {
 		if (part.common) {
-			output.push(...part.common);
+			merge.output.push(...part.common);
 			continue;
 		}
 		if (part.buffer1.length === 0 && part.buffer2.length === 0) continue;
-		conflicts++;
-		output.push(START, ...part.buffer1, MIDDLE, ...part.buffer2, END);
+		merge.conflict(part.buffer1, part.buffer2);
 	}
-	return { text: joinLines(output), conflicts };
+	return merge.outcome();
+}
+
+class ConflictWriter {
+	readonly output: string[] = [];
+	private conflicts = 0;
+	private overwritten = 0;
+
+	constructor(private readonly preferRemote: boolean) {}
+
+	conflict(local: readonly string[], remote: readonly string[]) {
+		if (this.preferRemote) {
+			this.overwritten++;
+			this.output.push(...remote);
+			return;
+		}
+		this.conflicts++;
+		this.output.push(START, ...local, MIDDLE, ...remote, END);
+	}
+
+	outcome(): MergeOutcome {
+		return {
+			text: joinLines(this.output),
+			conflicts: this.conflicts,
+			overwritten: this.overwritten,
+		};
+	}
 }
 
 /**
