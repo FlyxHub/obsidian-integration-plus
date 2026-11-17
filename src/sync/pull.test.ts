@@ -132,6 +132,20 @@ test("pull merges a Confluence edit into the note and keeps frontmatter and loca
 	expect(bases.get("1")?.version).toBe(4);
 });
 
+test("pull takes Confluence's lines for conflicts when preferConfluence is on", async () => {
+	const { vault, files } = fakeVault({ "A.md": '---\nconnie-page-id: "1"\n---\nLocal.\n' });
+	const { store, bases } = fakeState([base("1", "Original.\n", 1)]);
+	const remote = fakeRemote([page("1", "Remote.\n", 2)]);
+	const report = await new PullService(remote, vault, store, NO_MEDIA).pull({
+		...OPTIONS,
+		preferConfluence: true,
+	});
+	expect(report.conflicted).toEqual([]);
+	expect(report.overwritten).toEqual(["A.md"]);
+	expect(files["A.md"]).toBe('---\nconnie-page-id: "1"\n---\nRemote.\n');
+	expect(bases.get("1")?.version).toBe(2);
+});
+
 test("pull skips pages whose version matches the base", async () => {
 	const { vault } = fakeVault({ "A.md": '---\nconnie-page-id: "1"\n---\nText.\n' });
 	const { store } = fakeState([base("1", "Text.\n", 2)]);

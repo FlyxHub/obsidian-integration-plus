@@ -2,7 +2,11 @@
 
 All notable changes to Confluence Integration Plus are listed here. For the history of the plugin this one was forked from, see the [markdown-confluence changelog](https://github.com/markdown-confluence/markdown-confluence/blob/main/CHANGELOG.md).
 
-## 1.2.13 (unreleased)
+## 1.3.0 (unreleased)
+
+### Added
+
+- **Prefer Confluence on pull conflicts** setting. When it's on, a pull takes Confluence's version of any block that changed both in Obsidian and in Confluence, instead of adding conflict markers. Your changes to other blocks are kept, and the pull results list the notes where your version was replaced. It's off by default.
 
 ### Security
 

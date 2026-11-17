@@ -412,6 +412,7 @@ export default class ConfluencePlugin extends Plugin {
 					confluenceBaseUrl: settings.confluenceBaseUrl,
 					confluenceSiteUrl: settings.confluenceSiteUrl,
 					...(pageIds ? { pageIds } : {}),
+					preferConfluence: settings.preferConfluenceOnConflict,
 					...(importNew
 						? {
 								importUnder: {
@@ -427,6 +428,7 @@ export default class ConfluencePlugin extends Plugin {
 				if (
 					this.settings.showPublishResultsModal ||
 					report.conflicted.length > 0 ||
+					report.overwritten.length > 0 ||
 					report.noHistory.length > 0 ||
 					report.cancelled
 				)

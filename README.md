@@ -272,6 +272,8 @@ To resolve a conflict:
 
 The plugin doesn't publish or pull a note that still contains conflict markers.
 
+To skip conflicts and always keep what's in Confluence, turn on **Prefer Confluence on pull conflicts** in the plugin's settings. When a block changed on both sides, the pull replaces your version of that block with Confluence's version, and keeps your changes to other blocks. The pull results list the notes where this happened. To get a replaced block back, use the File recovery core plugin.
+
 ### How publishing uses pulled changes
 
 Like `git push`, publishing stops if Confluence has changes that you haven't pulled:

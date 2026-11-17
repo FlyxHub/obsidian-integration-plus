@@ -291,6 +291,12 @@ export class ConfluenceSettingTab extends PluginSettingTab {
 				() => settings.importNewPages,
 				(value) => (settings.importNewPages = value),
 			),
+			this.toggle(
+				"Prefer Confluence on pull conflicts",
+				"When you pull, keep Confluence's version of any lines that you and someone in Confluence both changed, instead of adding conflict markers. Your other changes are kept. The pull results list the notes where your lines were replaced.",
+				() => settings.preferConfluenceOnConflict,
+				(value) => (settings.preferConfluenceOnConflict = value),
+			),
 			this.text(
 				"Image folder",
 				"Vault folder where pulling saves images and other attachments from Confluence.",

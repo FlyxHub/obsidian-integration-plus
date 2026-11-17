@@ -28,6 +28,8 @@ export interface ObsidianPluginSettings
 	renderDataview: boolean;
 	/** When pulling all notes, create notes for new pages under the parent page. */
 	importNewPages: boolean;
+	/** When pulling, take Confluence's lines where they conflict with the note's. */
+	preferConfluenceOnConflict: boolean;
 	/** Vault folder where pull saves images and other attachments. */
 	imageFolder: string;
 	/** Published images wider than this many pixels are scaled down to it; 0 for no limit. */
@@ -44,6 +46,7 @@ const PLUGIN_DEFAULTS = {
 	showPublishResultsModal: true,
 	renderDataview: false,
 	importNewPages: true,
+	preferConfluenceOnConflict: false,
 	imageFolder: "images",
 	maxImageWidth: 700,
 	apiTokenSecretName: "",
