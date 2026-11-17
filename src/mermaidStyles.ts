@@ -38,7 +38,7 @@ type MermaidOwnTheme = (typeof MERMAID_OWN_THEMES)[number];
 
 /** Body classes for the themes that follow Obsidian's look. */
 const OBSIDIAN_BODY_CLASSES: Record<Exclude<MermaidTheme, MermaidOwnTheme>, () => string> = {
-	"match-obsidian": () => document.body.className,
+	"match-obsidian": () => activeDocument.body.className,
 	"dark-obsidian": () => "theme-dark",
 	"light-obsidian": () => "theme-light",
 };

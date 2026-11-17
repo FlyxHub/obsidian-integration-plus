@@ -2,6 +2,16 @@
 
 All notable changes to Confluence Integration Plus are listed here. For the history of the plugin this one was forked from, see the [markdown-confluence changelog](https://github.com/markdown-confluence/markdown-confluence/blob/main/CHANGELOG.md).
 
+## 1.2.12 (unreleased)
+
+### Fixed
+
+- The "Match Obsidian" Mermaid theme takes the theme classes from the window you publish from, so diagrams published from a pop-out window match that window.
+
+### Security
+
+- Development dependencies are updated to clear advisories in glob, minimatch, moment, and Vitest. None of them are part of the plugin that Obsidian loads.
+
 ## 1.2.11 (2026-10-27)
 
 ### Security
