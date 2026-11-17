@@ -9,7 +9,7 @@ type MermaidConfig = Record<string, unknown> & {
 
 /** What the Electron Mermaid renderer needs to draw diagrams the way the chosen theme looks. */
 export interface MermaidStyles {
-	extraStyleSheets: string[];
+	/** CSS for the render window, which loads no files or other resources of its own. */
 	extraStyles: string[];
 	mermaidConfig: MermaidConfig;
 	bodyStyles: string;
@@ -50,7 +50,7 @@ const OBSIDIAN_BODY_CLASSES: Record<Exclude<MermaidTheme, MermaidOwnTheme>, () =
  */
 export async function loadMermaidStyles(app: App, theme: MermaidTheme): Promise<MermaidStyles> {
 	if (isMermaidOwnTheme(theme))
-		return { extraStyleSheets: [], extraStyles: [], mermaidConfig: { theme }, bodyStyles: "" };
+		return { extraStyles: [], mermaidConfig: { theme }, bodyStyles: "" };
 
 	const bodyStyles = OBSIDIAN_BODY_CLASSES[theme]();
 	const cssTheme = getVaultConfig(app, "cssTheme");
@@ -72,11 +72,23 @@ export async function loadMermaidStyles(app: App, theme: MermaidTheme): Promise<
 	// previously derived colors, which can leave dark arrows on a dark image.
 	delete mermaidConfig.themeVariables;
 	return {
-		extraStyleSheets: ["app://obsidian.md/app.css"],
-		extraStyles: css.filter((text): text is string => !!text),
+		extraStyles: [appCss(), ...css].filter((text): text is string => !!text),
 		mermaidConfig,
 		bodyStyles,
 	};
+}
+
+/** Obsidian's own stylesheet, copied from the loaded page so the render window needn't fetch it. */
+function appCss(): string | undefined {
+	for (const sheet of Array.from(activeDocument.styleSheets)) {
+		if (sheet.href !== "app://obsidian.md/app.css") continue;
+		try {
+			return Array.from(sheet.cssRules, (rule) => rule.cssText).join("\n");
+		} catch {
+			return undefined; // Unreadable rules: the diagram keeps the theme and snippet CSS.
+		}
+	}
+	return undefined;
 }
 
 function isMermaidOwnTheme(theme: MermaidTheme): theme is MermaidOwnTheme {

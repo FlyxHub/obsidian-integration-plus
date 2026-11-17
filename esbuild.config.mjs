@@ -16,21 +16,16 @@ const prod = process.argv[2] === "production";
 const slimDependencies = {
 	name: "slim-dependencies",
 	setup(build) {
-		// The lib uses only NodeFileSystem and NodePath, but the package index also brings in
-		// the undici HTTP client, which needs node:sqlite. NodeFileSystem serves only the lib's
-		// CLI runtime; the plugin provides a vault-based FileSystem, so it becomes an empty layer
-		// and main.js doesn't contain Node's fs module.
-		build.onResolve({ filter: /^@effect\/platform-node$/ }, (args) => ({
-			path: args.path,
-			namespace: "slim-platform-node",
-		}));
-		build.onLoad({ filter: /.*/, namespace: "slim-platform-node" }, () => ({
-			contents: [
-				'import * as Layer from "effect/Layer";',
-				"export const NodeFileSystem = { layer: Layer.empty };",
-				'export * as NodePath from "@effect/platform-node/NodePath";',
-			].join("\n"),
-			resolveDir: process.cwd(),
+		// The lib bundles Effect's Node FileSystem, which serves only its CLI runtime; the plugin
+		// provides a vault-based FileSystem. An empty node:fs for the lib keeps Node's fs module
+		// out of main.js.
+		build.onResolve({ filter: /^node:fs$/ }, (args) =>
+			/[\\/]@markdown-confluence[\\/]lib[\\/]/.test(args.importer)
+				? { path: args.path, namespace: "slim-node-fs" }
+				: undefined,
+		);
+		build.onLoad({ filter: /.*/, namespace: "slim-node-fs" }, () => ({
+			contents: "",
 			loader: "js",
 		}));
 		// The lib renders math with MathJax's TeX font, so MathJax's default font is never used.

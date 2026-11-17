@@ -1,7 +1,7 @@
 import { expect, test } from "@effect/vitest";
 import { AlwaysADFProcessingPlugins, executeADFProcessingPipeline } from "@markdown-confluence/lib";
-import { keepHostedMedia } from "./hostedMedia";
 
+/** A pulled `adf` block's image: Confluence names the attachment by `id`, with no `url`. */
 const hosted = {
 	type: "media",
 	attrs: {
@@ -21,13 +21,10 @@ const doc = () => ({
 /** Only called for `file://` addresses, which this document has none of. */
 const uploader = {} as Parameters<typeof executeADFProcessingPipeline>[2];
 
+// Lib 7.0.0's uploader split the missing address and failed the publish; 7.0.1 skips such nodes.
 test("media that Confluence already hosts passes the attachment uploader untouched", async () => {
-	// Without the plugin, the lib's uploader splits the missing address and fails the publish.
-	await expect(
-		executeADFProcessingPipeline([...AlwaysADFProcessingPlugins], doc(), uploader),
-	).rejects.toThrow("split");
 	const result = await executeADFProcessingPipeline(
-		[keepHostedMedia(), ...AlwaysADFProcessingPlugins],
+		[...AlwaysADFProcessingPlugins],
 		doc(),
 		uploader,
 	);

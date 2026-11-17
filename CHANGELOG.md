@@ -2,6 +2,19 @@
 
 All notable changes to Confluence Integration Plus are listed here. For the history of the plugin this one was forked from, see the [markdown-confluence changelog](https://github.com/markdown-confluence/markdown-confluence/blob/main/CHANGELOG.md).
 
+## 1.2.13 (unreleased)
+
+### Security
+
+- The plugin now uses version 7.0.1 of the markdown-confluence library, which includes these security fixes:
+  - Note embeds have limits on count, nesting depth, and size, so a note can't make a publish run out of memory or freeze Obsidian.
+  - Matching existing inline comments to the new page content has limits, so a large page can't freeze Obsidian. Comments that can't be placed are kept under **Inline comments that couldn't be mapped**.
+- Mermaid diagrams are drawn in a window that can't make network or file requests, and a diagram that refers to an image, link, font, or style outside itself isn't published. Published SVG diagrams therefore can't load anything when someone opens them. Obsidian's own styles are copied into the window, not loaded from the app.
+
+### Changed
+
+- Mermaid diagrams with `click` links, `href` links, or images no longer publish. Remove the link or image to publish the diagram.
+
 ## 1.2.12 (2026-11-17)
 
 ### Fixed
