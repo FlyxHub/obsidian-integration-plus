@@ -15,6 +15,10 @@ All notable changes to Confluence Integration Plus are listed here. For the hist
 
 - Mermaid diagrams with `click` links, `href` links, or images no longer publish. Remove the link or image to publish the diagram.
 
+### Fixed
+
+- Pulled lists with images in their items, such as numbered steps with screenshots, become readable Markdown lists with each image embedded under its step. Before, the whole list became an `adf` code block. Your next pull converts these lists in notes you've already pulled.
+
 ## 1.2.12 (2026-11-17)
 
 ### Fixed
