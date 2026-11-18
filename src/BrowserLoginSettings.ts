@@ -40,7 +40,7 @@ function appRegistrationRows(plugin: ConfluencePlugin, redisplay: () => void): S
 						.onChange(async (value) => {
 							if (value !== "authorization-code" && value !== "device") return;
 							settings.oauthFlow = value;
-							auth.status = "";
+							auth.lastResult = "";
 							await plugin.saveSettings();
 							redisplay();
 						}),
@@ -56,7 +56,7 @@ function appRegistrationRows(plugin: ConfluencePlugin, redisplay: () => void): S
 						.setDisabled(disabled)
 						.onChange(async (value) => {
 							settings.oauthClientId = value.trim();
-							auth.status = "";
+							auth.lastResult = "";
 							await plugin.saveSettings();
 						}),
 				),
@@ -112,7 +112,7 @@ function appRegistrationRows(plugin: ConfluencePlugin, redisplay: () => void): S
 
 /** The device code while one is pending, and the connect, cancel and disconnect buttons. */
 function connectionRows(plugin: ConfluencePlugin, redisplay: () => void): SettingRow[] {
-	const { settings, browserOAuth: auth } = plugin;
+	const auth = plugin.browserOAuth;
 	const rows: SettingRow[] = [];
 	const device = auth.deviceAuthorization;
 	if (device) {
@@ -153,7 +153,6 @@ function connectionRows(plugin: ConfluencePlugin, redisplay: () => void): Settin
 					.onClick(async () => {
 						try {
 							await auth.connect(redisplay);
-							await plugin.selectOAuthSite(settings.oauthSiteId);
 							new Notice("Connected to Atlassian");
 						} catch (error) {
 							new Notice(errorMessage(error));
@@ -186,6 +185,8 @@ function siteChoiceRows(plugin: ConfluencePlugin, redisplay: () => void): Settin
 						dropdown.addOption(site.id, new URL(site.url).hostname);
 					dropdown.setValue(settings.oauthSiteId).onChange(async (value) => {
 						await plugin.selectOAuthSite(value);
+						// A connection test's result was for the previous site.
+						auth.lastResult = "";
 						redisplay();
 					});
 				}),
@@ -202,11 +203,12 @@ function siteChoiceRows(plugin: ConfluencePlugin, redisplay: () => void): Settin
 							const page = await client.content.getContentById({
 								id: settings.confluenceParentId,
 							});
-							auth.status = `Connected · Parent page: ${page.title}`;
+							auth.lastResult = `Connected · Parent page: ${page.title}`;
 						} catch {
-							auth.status = "Could not access the parent page. Check its ID, site and permissions.";
+							auth.lastResult =
+								"Could not access the parent page. Check its ID, site and permissions.";
 						}
-						new Notice(auth.status);
+						new Notice(auth.lastResult);
 						redisplay();
 					}),
 				),
