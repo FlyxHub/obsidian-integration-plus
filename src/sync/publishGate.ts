@@ -1,5 +1,6 @@
 import type { ConfluenceRemote } from "./confluenceRemote";
 import { hasConflictMarkers } from "./merge";
+import { localStatus, remoteStatus } from "./noteStatus";
 import type { SyncStateStore } from "./syncState";
 
 export interface NoteToPublish {
@@ -55,14 +56,26 @@ export async function checkBeforePublish(
 	const bases = await Promise.all(linked.map((note) => state.get(note.pageId)));
 	const withBase = linked.flatMap((note, index) => {
 		const base = bases[index];
-		return base ? [{ ...note, baseVersion: base.version }] : [];
+		return base ? [{ ...note, base }] : [];
 	});
 	const versions = await remote.getVersions(withBase.map((note) => note.pageId));
-	for (const { path, pageId, baseVersion } of withBase) {
-		const remoteVersion = versions.get(pageId);
-		if (remoteVersion === undefined) continue;
-		if (remoteVersion > baseVersion) blocked.push({ fileName: path, reason: NEEDS_PULL });
-		else if (remoteVersion === baseVersion) upToDate.add(path);
+	for (const { path, pageId, base } of withBase) {
+		const status = remoteStatus(base, versions.get(pageId));
+		switch (status) {
+			case "changed":
+				blocked.push({ fileName: path, reason: NEEDS_PULL });
+				break;
+			case "at-base":
+				upToDate.add(path);
+				break;
+			// The publisher's own checks decide: it refuses a page that another user edited last.
+			case "unknown":
+			case "older":
+			case "no-base":
+				break;
+			default:
+				status satisfies never;
+		}
 	}
 	return { blocked, upToDate };
 }
@@ -80,11 +93,12 @@ export async function findChangedNotes(
 	fingerprint: NoteFingerprinter,
 ): Promise<NoteToPublish[]> {
 	const changed = await Promise.all(
-		notes.map(async (note) => {
-			if (!note.pageId) return true;
-			const recorded = (await state.get(note.pageId))?.localFingerprint;
-			return recorded === undefined || (await fingerprint(note.path)) !== recorded;
-		}),
+		notes.map(
+			async (note) =>
+				!note.pageId ||
+				(await localStatus(await state.get(note.pageId), () => fingerprint(note.path))) ===
+					"changed",
+		),
 	);
 	return notes.filter((_, index) => changed[index]);
 }

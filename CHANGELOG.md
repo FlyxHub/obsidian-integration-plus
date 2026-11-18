@@ -2,6 +2,14 @@
 
 All notable changes to Confluence Integration Plus are listed here. For the history of the plugin this one was forked from, see the [markdown-confluence changelog](https://github.com/markdown-confluence/markdown-confluence/blob/main/CHANGELOG.md).
 
+## 1.3.1 (unreleased)
+
+### Fixed
+
+- When you disconnect from Atlassian while a sign-in is waiting for approval, the settings now show **Disconnected** instead of **Login cancelled**.
+- After you choose another Confluence site, the settings no longer show the connection test result for the previous site.
+- Signing in now saves the chosen site and the publish destination together. Before, a failure between the two steps could leave the plugin connected but publishing to a different site, which the next publish refused.
+
 ## 1.3.0 (2026-11-17)
 
 ### Added

@@ -30,6 +30,8 @@ function fixture(extra: OAuthDependencies = {}) {
 		oauthSecretId: "",
 		oauthSites: [],
 		oauthSiteId: "",
+		confluenceBaseUrl: "",
+		confluenceSiteUrl: "",
 	};
 	const secrets = new Map<string, string>();
 	const storage = {
@@ -233,4 +235,44 @@ test("no Confluence grant never saves an apparently connected session", async ()
 	await expect(auth.connect()).rejects.toThrow("No Confluence site");
 	expect(auth.connected).toBe(false);
 	expect(secrets.size).toBe(0);
+});
+test("login makes the chosen site the publish destination before saving", async () => {
+	const { auth, settings, save } = fixture();
+	let savedDestination = "";
+	save.mockImplementation(async () => {
+		savedDestination = settings.confluenceBaseUrl;
+	});
+	await auth.connect();
+	expect(settings.oauthSiteId).toBe(site.id);
+	expect(settings.confluenceBaseUrl).toBe(`https://api.atlassian.com/ex/confluence/${site.id}`);
+	expect(settings.confluenceSiteUrl).toBe(site.url);
+	expect(savedDestination).toBe(settings.confluenceBaseUrl);
+	expect(auth.status).toBe("Connected");
+	expect(() => auth.selectSite("other")).toThrow("Choose an authorized Confluence site.");
+	expect(settings.oauthSiteId).toBe(site.id);
+});
+test("the status follows the login, and a stopped login doesn't overwrite what stopped it", async () => {
+	const { auth } = fixture({
+		receiveCode: async (_callback, _state, signal, ready) => {
+			ready();
+			return new Promise((_resolve, reject) =>
+				signal.addEventListener("abort", () => reject(new Error("cancelled")), {
+					once: true,
+				}),
+			);
+		},
+	});
+	const cancelled = auth.connect();
+	const cancelRejected = expect(cancelled).rejects.toThrow("Login cancelled");
+	expect(auth.status).toBe("Waiting for approval in your browser…");
+	auth.cancel();
+	await cancelRejected;
+	expect(auth.status).toBe("Login cancelled");
+
+	const disconnected = auth.connect();
+	const disconnectRejected = expect(disconnected).rejects.toThrow("Login cancelled");
+	await auth.disconnect();
+	await disconnectRejected;
+	expect(auth.pending).toBe(false);
+	expect(auth.status).toBe("Disconnected");
 });

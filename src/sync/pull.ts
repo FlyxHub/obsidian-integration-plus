@@ -11,6 +11,7 @@ import {
 	sameLines,
 	splitFrontmatter,
 } from "./merge";
+import { hasCurrentFormat, localStatus, remoteStatus, snapshotIsCurrent } from "./noteStatus";
 import { createPageLinkResolver, rewritePageLinks, type PageLinkResolver } from "./pageLinks";
 import { isFolderNote } from "./partialPublish";
 import { toNoteName } from "./names";
@@ -221,7 +222,7 @@ export class PullService {
 		for (const { pageId, unchanged, fingerprint } of pages) {
 			try {
 				const existing = await this.state.get(pageId);
-				if (unchanged && existing?.format === MERGE_FORMAT) {
+				if (unchanged && existing && hasCurrentFormat(existing)) {
 					// Confluence already matches the base; only the note's fingerprint is new.
 					if (existing.localFingerprint !== fingerprint)
 						await this.state.set({ ...existing, localFingerprint: fingerprint });
@@ -257,13 +258,8 @@ export class PullService {
 			return;
 		}
 		const base = await this.state.get(pageId);
-		// A snapshot in an older format, or with links to pages that now have notes, is
-		// converted again even if the page didn't change, so the improvement reaches the note.
-		const current =
-			base?.format === MERGE_FORMAT &&
-			!base.unresolvedLinks.some((id) => resolve(id)) &&
-			base.unresolvedMedia.length === 0;
-		if (base && current && remoteVersion === base.version) {
+		const current = snapshotIsCurrent(base, resolve);
+		if (current && remoteStatus(base, remoteVersion) === "at-base") {
 			report.unchanged++;
 			return;
 		}
@@ -272,16 +268,14 @@ export class PullService {
 			report.deleted.push(path);
 			return;
 		}
-		if (base && current && page.version === base.version) {
+		if (current && remoteStatus(base, page.version) === "at-base") {
 			report.unchanged++;
 			return;
 		}
 
 		// A note that was in sync before the pull stays in sync if the merge is clean. One with
 		// local changes keeps its old fingerprint, so the next publish still sends it.
-		const wasInSync =
-			base?.localFingerprint !== undefined &&
-			(await this.vault.fingerprint(path)) === base.localFingerprint;
+		const wasInSync = (await localStatus(base, () => this.vault.fingerprint(path))) === "in-sync";
 		const remote = await this.convert(
 			page,
 			options,

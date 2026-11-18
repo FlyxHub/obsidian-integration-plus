@@ -8,6 +8,7 @@ import {
 	type OAuthTokens,
 } from "./AtlassianOAuth";
 import { oauthCallbackUrl } from "./OAuthCallback";
+import { oauthApiUrl } from "./settings";
 
 export interface BrowserOAuthSettings {
 	oauthMode: "service-account" | "browser";
@@ -18,6 +19,9 @@ export interface BrowserOAuthSettings {
 	oauthSecretId: string;
 	oauthSites: OAuthSite[];
 	oauthSiteId: string;
+	/** The publish destination, which `selectSite` keeps on the chosen site. */
+	confluenceBaseUrl: string;
+	confluenceSiteUrl: string;
 }
 interface StoredTokens extends OAuthTokens {
 	configuration: string;
@@ -29,16 +33,31 @@ interface StoredTokens extends OAuthTokens {
  */
 const REFRESH_AHEAD_MS = 10 * 60 * 1000;
 
+/** Where a login started with `connect` is. Only the login that owns `controller` changes it. */
+type Login =
+	| { step: "idle" }
+	/** Requesting a device code, or starting the callback listener. */
+	| { step: "starting"; controller: AbortController }
+	/**
+	 * Waiting for the user to approve access at `url`, then exchanging the approval for tokens
+	 * and saving them. `device` is the code to enter, for device login.
+	 */
+	| {
+			step: "approving";
+			controller: AbortController;
+			url: string;
+			device: DeviceAuthorization | undefined;
+	  };
+
 /** Owns desktop browser/device login and rotating credentials for one vault. */
 export class BrowserOAuth {
-	private controller: AbortController | undefined;
+	private login: Login = { step: "idle" };
 	private refreshController: AbortController | undefined;
 	private refreshing: Promise<string> | undefined;
 	private generation = 0;
 	private readonly client: AtlassianOAuth;
-	private authorizationUrl = "";
-	deviceAuthorization: DeviceAuthorization | undefined;
-	status = "";
+	/** The outcome of the last login, cancel, disconnect or connection test. */
+	lastResult = "";
 	constructor(
 		private readonly settings: () => BrowserOAuthSettings,
 		private readonly storage: () => Pick<SecretStorage, "getSecret" | "setSecret">,
@@ -49,7 +68,25 @@ export class BrowserOAuth {
 		this.client = new AtlassianOAuth(dependencies);
 	}
 	get pending() {
-		return !!this.controller;
+		return this.login.step !== "idle";
+	}
+	get deviceAuthorization(): DeviceAuthorization | undefined {
+		return this.login.step === "approving" ? this.login.device : undefined;
+	}
+	/** What the login is doing, or the last outcome while none runs. */
+	get status(): string {
+		switch (this.login.step) {
+			case "idle":
+				return this.lastResult;
+			case "starting":
+				return this.settings().oauthFlow === "device"
+					? "Requesting a device code…"
+					: "Opening Atlassian login…";
+			case "approving":
+				return this.login.device
+					? "Enter the code in your browser and approve access…"
+					: "Waiting for approval in your browser…";
+		}
 	}
 	get connected() {
 		try {
@@ -130,7 +167,19 @@ export class BrowserOAuth {
 		);
 	}
 	openBrowser() {
-		if (this.pending && this.authorizationUrl) this.openUrl(this.authorizationUrl);
+		if (this.login.step === "approving") this.openUrl(this.login.url);
+	}
+	/**
+	 * Choose one of the sites approved during login and make it the publish destination, so
+	 * the two can't disagree. The caller saves the settings.
+	 */
+	selectSite(id: string) {
+		const settings = this.settings();
+		const site = settings.oauthSites.find((item) => item.id === id);
+		if (!site) throw new Error("Choose an authorized Confluence site.");
+		settings.oauthSiteId = id;
+		settings.confluenceBaseUrl = oauthApiUrl(site.id);
+		settings.confluenceSiteUrl = site.url;
 	}
 	async connect(onChange: () => void = () => {}) {
 		if (this.pending) return;
@@ -138,64 +187,61 @@ export class BrowserOAuth {
 		const credentials = this.credentials();
 		this.cancel();
 		const controller = new AbortController();
-		this.controller = controller;
+		this.login = { step: "starting", controller };
 		const generation = this.generation;
-		this.status =
-			this.settings().oauthFlow === "device"
-				? "Requesting a device code…"
-				: "Opening Atlassian login…";
+		/** False once `cancel` ended this login; the outcome is then `cancel`'s or a later one. */
+		const current = () => this.login.step !== "idle" && this.login.controller === controller;
 		onChange();
 		try {
-			const showBrowser = (url: string) => {
+			const showBrowser = (url: string, device?: DeviceAuthorization) => {
 				if (controller.signal.aborted) throw new Error("Login cancelled");
-				this.authorizationUrl = url;
-				this.status = this.deviceAuthorization
-					? "Enter the code in your browser and approve access…"
-					: "Waiting for approval in your browser…";
+				this.login = { step: "approving", controller, url, device };
 				onChange();
 				this.openBrowser();
 			};
 			const tokens =
 				this.settings().oauthFlow === "device"
-					? await this.client.device(credentials, controller.signal, (device) => {
-							this.deviceAuthorization = device;
-							showBrowser(device.verificationUrl);
-						})
+					? await this.client.device(credentials, controller.signal, (device) =>
+							showBrowser(device.verificationUrl, device),
+						)
 					: await this.client.browser(
 							credentials,
 							this.settings().oauthCallbackUrl,
 							controller.signal,
-							showBrowser,
+							(url) => showBrowser(url),
 						);
 			const sites = await this.client.sites(tokens.accessToken, controller.signal);
 			this.checkConnection(generation, configuration);
 			await this.store(tokens, configuration, generation);
 			this.checkConnection(generation, configuration);
 			this.settings().oauthSites = sites;
-			this.settings().oauthSiteId =
-				sites.find((site) => site.id === this.settings().oauthSiteId)?.id ?? sites[0]!.id;
+			this.selectSite(
+				sites.find((site) => site.id === this.settings().oauthSiteId)?.id ?? sites[0]!.id,
+			);
 			await this.save();
 			this.checkConnection(generation, configuration);
-			this.status = "Connected";
+			this.lastResult = "Connected";
 		} catch (error) {
-			this.status = controller.signal.aborted
+			const message = controller.signal.aborted
 				? "Login cancelled"
 				: error instanceof Error
 					? error.message
 					: "Login failed. Please try again.";
-			throw new Error(this.status);
+			if (current()) this.lastResult = message;
+			throw new Error(message);
 		} finally {
-			if (this.controller === controller) {
-				this.controller = undefined;
-				this.authorizationUrl = "";
-				this.deviceAuthorization = undefined;
-			}
+			if (current()) this.login = { step: "idle" };
 			onChange();
 		}
 	}
+	/** Stop a pending login and any token refresh, and refuse tokens that arrive afterwards. */
 	cancel() {
 		this.generation++;
-		this.controller?.abort();
+		if (this.login.step !== "idle") {
+			this.login.controller.abort();
+			this.login = { step: "idle" };
+			this.lastResult = "Login cancelled";
+		}
 		this.refreshController?.abort();
 		this.refreshing = undefined;
 	}
@@ -205,7 +251,7 @@ export class BrowserOAuth {
 		if (settings.oauthSecretId) this.storage().setSecret(settings.oauthSecretId, "");
 		settings.oauthSites = [];
 		settings.oauthSiteId = "";
-		this.status = "Disconnected";
+		this.lastResult = "Disconnected";
 		await this.save();
 	}
 	async accessToken(): Promise<string> {

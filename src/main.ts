@@ -41,6 +41,7 @@ import { imageSize } from "./imageSize";
 import { krokiFetch, plantumlFetch } from "./KrokiFetch";
 import { loadMermaidStyles, type MermaidStyles } from "./mermaidStyles";
 import { toVaultPath } from "./paths";
+import { classifyPublishResult } from "./publishOutcome";
 import { isExcluded, publishFlagFor } from "./publishSelection";
 import { pageUrlsById, restoreSmartLinkUrls } from "./smartLinks";
 import { wikilinksToPageLinks, type PageUrlLookup } from "./wikilinks";
@@ -51,6 +52,7 @@ import {
 	type ConfluenceRemote,
 } from "./sync/confluenceRemote";
 import { MediaSync } from "./sync/media";
+import { remoteStatus } from "./sync/noteStatus";
 import {
 	createNoteFingerprinter,
 	createObsidianPullVault,
@@ -84,8 +86,6 @@ import {
 
 /** Manifest ID of the plugin this one was forked from. */
 const LEGACY_PLUGIN_ID = "confluence-integration";
-/** The publisher's error when a page was last edited by someone else. */
-const EDITED_BY_OTHER_USER = "Page last updated by another user";
 /** Settings that name entries in secret storage or sites signed in to; see `readLegacySettings`. */
 const SECRET_REFERENCE_KEYS = [
 	"apiTokenSecretName",
@@ -309,11 +309,7 @@ export default class ConfluencePlugin extends Plugin {
 	}
 
 	async selectOAuthSite(id: string) {
-		const site = this.settings.oauthSites.find((item) => item.id === id);
-		if (!site) throw new Error("Choose an authorized Confluence site.");
-		this.settings.oauthSiteId = id;
-		this.settings.confluenceBaseUrl = oauthApiUrl(site.id);
-		this.settings.confluenceSiteUrl = site.url;
+		this.browserOAuth.selectSite(id);
 		await this.saveSettings();
 	}
 
@@ -526,28 +522,30 @@ export default class ConfluencePlugin extends Plugin {
 			filesUploadResult: [],
 		};
 		const treeOnlyUploads: UploadResults["filesUploadResult"] = [];
+		const context = {
+			changed,
+			forceOverwrite: this.settings.forceOverwrite,
+			upToDate: check.upToDate,
+		};
 		for (const result of results) {
 			const path = toVaultPath(result.node.file.absoluteFilePath);
-			let uploaded = result.successfulUploadResult;
-			let reason = result.reason;
-			const editedByOtherUser = !uploaded && !!reason?.includes(EDITED_BY_OTHER_USER);
-			// Unchanged notes included only for the page tree aren't reported, unless they failed.
-			// Their pages may still get a new version, so their bases are recorded all the same.
-			if (changed && !changed.has(path) && (uploaded || editedByOtherUser)) {
-				if (uploaded) treeOnlyUploads.push(uploaded);
-				continue;
-			}
-			// The page was last edited by someone else, but that edit is exactly the version
-			// that was pulled and merged into this note, so it's safe to publish over it, if no
-			// one saved the page since the check. A partial publish also applies the "Overwrite
-			// other users' edits" setting here.
-			const overwriteBySetting = changed !== undefined && this.settings.forceOverwrite;
-			if (editedByOtherUser && (overwriteBySetting || check.upToDate.has(path))) {
+			let outcome = classifyPublishResult(
+				path,
+				result.successfulUploadResult,
+				result.reason,
+				context,
+			);
+			if (outcome.kind === "overwrite") {
+				// No one may have saved the page since the check, unless the setting allows it.
 				const pageId = toCheck.find((note) => note.path === path)?.pageId;
 				try {
-					if (signal.aborted) reason = "Publishing was cancelled before this page was published.";
-					else if (!overwriteBySetting && !(pageId && (await this.stillAtBase(remote, pageId))))
-						reason = NEEDS_PULL;
+					if (signal.aborted)
+						outcome = {
+							kind: "failed",
+							reason: "Publishing was cancelled before this page was published.",
+						};
+					else if (outcome.checkBase && !(pageId && (await this.stillAtBase(remote, pageId))))
+						outcome = { kind: "failed", reason: NEEDS_PULL };
 					else {
 						const forced = this.createPublisher(client, mermaidStyles, {
 							forceOverwrite: true,
@@ -556,20 +554,28 @@ export default class ConfluencePlugin extends Plugin {
 						const retry = (
 							await this.runObsidianEffect(forced.publishEffect(path, { signal }), partial)
 						).find((entry) => toVaultPath(entry.node.file.absoluteFilePath) === path);
-						uploaded = retry?.successfulUploadResult;
-						reason = retry?.reason;
+						outcome = retry?.successfulUploadResult
+							? { kind: "uploaded", result: retry.successfulUploadResult }
+							: { kind: "failed", reason: retry?.reason ?? "No reason provided" };
 					}
 				} catch (error) {
 					// Keep going, so the pages already published still get their bases recorded.
-					reason = errorMessage(error);
+					outcome = { kind: "failed", reason: errorMessage(error) };
 				}
 			}
-			if (uploaded) uploadResults.filesUploadResult.push(uploaded);
-			else
-				uploadResults.failedFiles.push({
-					fileName: path,
-					reason: reason ?? "No reason provided",
-				});
+			switch (outcome.kind) {
+				case "uploaded":
+					uploadResults.filesUploadResult.push(outcome.result);
+					break;
+				case "tree-only":
+					if (outcome.result) treeOnlyUploads.push(outcome.result);
+					break;
+				case "failed":
+					uploadResults.failedFiles.push({ fileName: path, reason: outcome.reason });
+					break;
+				default:
+					outcome satisfies never;
+			}
 		}
 
 		uploadResults.failedFiles.push(
@@ -587,7 +593,7 @@ export default class ConfluencePlugin extends Plugin {
 	private async stillAtBase(remote: ConfluenceRemote, pageId: string): Promise<boolean> {
 		const base = await this.syncState.get(pageId);
 		const current = (await remote.getVersions([pageId])).get(pageId);
-		return base !== undefined && current === base.version;
+		return remoteStatus(base, current) === "at-base";
 	}
 
 	/**
