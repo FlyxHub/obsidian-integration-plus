@@ -213,6 +213,23 @@ test("keeps heading levels within bounds and ignores attribute names built-in ob
 	expect(odd).toContain('"panelType": "constructor"');
 });
 
+test("ignores block widths set in Confluence's editor", () => {
+	const wide = [{ type: "breakout", attrs: { mode: "wide" } }];
+	const markdown = adfToMergeMarkdown(
+		doc(
+			{ type: "panel", attrs: { panelType: "warning" }, content: [paragraph("hi")], marks: wide },
+			{
+				type: "codeBlock",
+				attrs: { language: "sh" },
+				content: [{ type: "text", text: "ls" }],
+				marks: wide,
+			},
+		),
+		BASE_URL,
+	);
+	expect(markdown).toBe("> [!warning]\n> hi\n\n```sh\nls\n```\n");
+});
+
 test("neutralizes executable fences in snapshots from before the ADF was neutralized", () => {
 	const old =
 		"> ```dataviewjs\nx\n> ```\n\n- ~~~ DataviewJS\n\n```dataview\nLIST\n```\n\n` $= x`\n";
