@@ -2,6 +2,12 @@
 
 All notable changes to Confluence Integration Plus are listed here. For the history of the plugin this one was forked from, see the [markdown-confluence changelog](https://github.com/markdown-confluence/markdown-confluence/blob/main/CHANGELOG.md).
 
+## 1.3.2 (unreleased)
+
+### Fixed
+
+- Pulling a page no longer turns a panel or code block into an `adf` code block when someone changed its width in Confluence's editor. Notes that already got one go back to readable Markdown on the next pull. Publishing from Obsidian resets such a block to the default width, because Markdown can't store it.
+
 ## 1.3.1 (2026-11-18)
 
 ### Fixed

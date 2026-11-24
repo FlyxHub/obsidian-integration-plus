@@ -73,8 +73,10 @@ function joinBlocks(content: unknown[], confluenceBaseUrl: string, media: MediaR
  * 10: code languages checked by their first word, inline `$=` checked after code text is
  *    joined, and heading levels kept within 1 to 6.
  * 11: lists with images or files in their items readable, with embeds under each item.
+ * 12: block widths set in Confluence's editor (`breakout` marks) ignored, so wide panels
+ *    and code blocks are readable.
  */
-export const MERGE_FORMAT = 11;
+export const MERGE_FORMAT = 12;
 
 /** The first format that neutralizes code in the ADF; see `neutralizeLegacyBase`. */
 const ADF_NEUTRALIZED_FORMAT = 8;
@@ -317,9 +319,14 @@ function stripPresentation<T>(value: T): T {
 			if (Object.keys(attrs).length > 0) result[key] = sortKeys(attrs);
 			continue;
 		}
-		if ((key === "marks" || key === "content") && Array.isArray(child) && child.length === 0)
+		// A block's width in Confluence's editor; Markdown can't hold it, and publishing resets it.
+		const kept =
+			key === "marks" && Array.isArray(child)
+				? child.filter((mark) => (mark as { type?: unknown })?.type !== "breakout")
+				: child;
+		if ((key === "marks" || key === "content") && Array.isArray(kept) && kept.length === 0)
 			continue;
-		result[key] = stripPresentation(child);
+		result[key] = stripPresentation(kept);
 	}
 	const { content, marks, attrs } = result as {
 		content?: unknown;
